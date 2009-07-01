@@ -1,0 +1,32 @@
+mod_http_pre_bind for ejabberd. 
+
+When using anonymous users the authentication process through BOSH can
+take a second or two.  These seconds can be saved by doing all of the
+authentication and bosh session setup on one call. mod_http_pre_bind
+does this and returns a jid,sid, and rid of a valid BOSH session.
+
+It requires mod_http_bind.
+
+To build run the build.sh script and install the resulting beam files
+in your ejabberd ebin directory.
+
+Install both in ejabberd.cfg.
+
+
+{5288, ejabberd_http, [
+                         http_bind, 
+                         web_admin,
+                         {request_handlers, 
+                          [{["http-pre-bind"], 
+                            mod_http_pre_bind}]}
+                        ]}
+
+
+%%
+%% Modules enabled in all ejabberd virtual hosts.
+%%
+{modules,
+ [
+  {mod_http_bind,      []},
+  {mod_http_pre_bind,      []},
+

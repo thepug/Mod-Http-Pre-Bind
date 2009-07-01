@@ -43,6 +43,7 @@ process_request(Data, IP) ->
 					    Payload,
 					    PayloadSize,
 					    IP),
+    %After session start, send the anonymous authentication mechanism.
     AuthAttrs = [{"rid",integer_to_list(Rid+1)},
 		 {"xmlns",?NS_HTTP_BIND},
 		 {"sid",Sid}],
@@ -63,7 +64,7 @@ process_request(Data, IP) ->
 					Rid+1,
 					AuthAttrs,
 					false),
-
+    
     StreamAttrs = [{"rid",integer_to_list(Rid+2)},
 		   {"sid",Sid},
 		   {"xmlns",?NS_HTTP_BIND},
@@ -100,9 +101,7 @@ process_request(Data, IP) ->
 					  BindPayloadSize,
 					  false,
 					  IP
-					 ),
-    
-    ?ERROR_MSG(" response: ~p",[Put]),
+					 ),    
     {_,_,Retval0} = ejabberd_http_bind:prepare_response(Put,
 						  Rid+3,
 						  BindAttrs,
@@ -111,16 +110,14 @@ process_request(Data, IP) ->
 			   [Retval0,
 			    (Rid+3),
 			    Sid]),
-    ?ERROR_MSG(" return: ~p",[Retval]),
     Retval.
 
 code_change(_OldVsn, StateName, StateData, _Extra) ->
     {ok, StateName, StateData}.
-
+%%Parse the initial client request to start the pre bind session.
 parse_request(Data) ->
     case xml_stream:parse_element(Data) of
         {xmlelement, "body", Attrs, _Els} ->
-	    ?ERROR_MSG("A body ~p",[Attrs]),
 	    case catch list_to_integer(xml:get_attr_s("rid", Attrs)) of
 		{'EXIT', _} ->
 		    ?ERROR_MSG("error in body ~p",["Exit"]),
