@@ -106,7 +106,7 @@ process_request(Data, IP) ->
 						  Rid+3,
 						  BindAttrs,
 						  false),
-    Retval = io_lib:format("<prebind>~s~n<rid>~p</rid><sid>~s</sid></prebind>",
+    Retval = io_lib:format("<?xml version=\"1.0\" encoding=\"UTF-8\"?>~n<prebind>~s~n<rid>~p</rid><sid>~s</sid></prebind>",
 			   [Retval0,
 			    (Rid+3),
 			    Sid]),
