@@ -106,10 +106,13 @@ process_request(Data, IP) ->
 						  Rid+3,
 						  BindAttrs,
 						  false),
-    Retval = io_lib:format("<?xml version=\"1.0\" encoding=\"UTF-8\"?>~n<prebind>~s~n<rid>~p</rid><sid>~s</sid></prebind>",
-			   [Retval0,
-			    (Rid+3),
-			    Sid]),
+    {xmlelement,"body",RetAttrs,Els} = xml_stream:parse_element(Retval0),
+    XmlElementString = xml:element_to_string({xmlelement,"body",
+					      RetAttrs ++ [{"sid",Sid}] ++ [{"rid",integer_to_list(Rid+3)}],
+					      Els}),
+    Retval = {200,
+	      [{"Content-Type","text/xml; charset=utf-8"}],
+	      XmlElementString},
     Retval.
 
 code_change(_OldVsn, StateName, StateData, _Extra) ->
