@@ -140,7 +140,8 @@ process_request(Data, IP) ->
 
 code_change(_OldVsn, StateName, StateData, _Extra) ->
     {ok, StateName, StateData}.
-%%Parse the initial client request to start the pre bind session.
+%% Parse the initial client request to start the pre bind session.
+%% TODO: add real user support
 parse_request(Data) ->
     case xml_stream:parse_element(Data) of
         {xmlelement, "body", Attrs, _Els} ->

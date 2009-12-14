@@ -6,8 +6,7 @@
 
 %%%----------------------------------------------------------------------
 %%% this module acts as a bridge to ejabberd_http_pre_bind which implements
-%%% the real stuff, this is to handle the new pluggable architecture for
-%%% extending ejabberd's http service
+%%% the real stuff
 %%%----------------------------------------------------------------------
 
 -module(mod_http_pre_bind).
