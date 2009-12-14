@@ -33,3 +33,23 @@ Install both in ejabberd.cfg.
   {mod_http_bind,      []},
   {mod_http_pre_bind,      []},
 
+
+Example post and response:
+
+POST
+<body to='example.com' rid='1234567' wait='60' hold='1' />
+
+
+
+Response:
+ <body xmlns='http://jabber.org/protocol/httpbind'   
+       sid='892efca20cea238958f0603f89a6f8472ef790fe'   
+       rid='1234568'>  
+   <iq xmlns='jabber:client'  
+       id='_bind_auth_2'  
+       type='result'>  
+     <bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'>  
+       <jid>22720631691260831658412599@example.com/37436661951260831658614586</jid>  
+     </bind>  
+   </iq>  
+</body>
