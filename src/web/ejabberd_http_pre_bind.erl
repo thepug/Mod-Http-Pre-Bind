@@ -6,7 +6,7 @@
 
 -module(ejabberd_http_pre_bind).
 
--behaviour(gen_fsm).
+
 
 %% External exports
 -export([code_change/4,
@@ -16,10 +16,13 @@
 -include("jlib.hrl").
 -include("ejabberd_http.hrl").
 
+
 -define(NS_HTTP_BIND, "http://jabber.org/protocol/httpbind").
 -define(HEADER, [{"Content-Type", "text/xml; charset=utf-8"}, 
                  {"Access-Control-Allow-Origin", "*"}, 
                  {"Access-Control-Allow-Headers", "Content-Type"}]).
+
+-define(MAX_COUNT, 3).
 
 %% handle http put similar to bind, but withouth send_outpacket
 handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) ->
@@ -31,9 +34,6 @@ handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) ->
             ?DEBUG("Error on HTTP put. Reason: ~p", [Reason]),
             %% ignore errors
             {200, ?HEADER, "<body xmlns='"++?NS_HTTP_BIND++"'/>"}; 
-        {{repeat, OutPacket}, Sess} ->
-            ?DEBUG("http_put said 'repeat!' ...~nOutPacket: ~p", [OutPacket]),
-            send_outpacket(Sess, OutPacket);            
         {{wait, Pause}, _Sess} ->
 	    ?DEBUG("Trafic Shaper: Delaying request ~p", [Rid]),
 	    timer:sleep(Pause),
@@ -43,7 +43,99 @@ handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) ->
             ?DEBUG("buffered", []),
             {200, ?HEADER, "<body xmlns='"++?NS_HTTP_BIND++"'/>"};
         {ok, Sess} ->
-            ejabberd_http_bind:prepare_response(Sess, Rid, Attrs, StreamStart)
+            handle_response(Sess, Rid);
+	Out ->
+	    ?ERROR_MSG("Handle Put was invalid : ~p ~n", [Out])
+    end.
+
+
+handle_response(Sess, Rid) ->    
+    case catch ejabberd_http_bind:http_get(Sess, Rid) of
+	{ok, cancel} ->
+            {ok, cancel};
+	{ok, empty} ->
+	    {ok, empty};
+	{ok, terminate} ->
+	    {ok, terminate};
+	{ok, ROutPacket} ->
+	    OutPacket = lists:reverse(ROutPacket),
+	    ?DEBUG("OutPacket: ~p", [OutPacket]),
+            {ok, OutPacket};
+	{'EXIT', {shutdown, _}} ->
+            {error, terminate};
+	{'EXIT', _Reason} ->
+	    {error, terminate}
+    end.
+handle_auth(_Sid, Rid, 
+	    _Attrs, _Payload, 
+	    _PayloadSize, 
+	    _StreamStart, 
+	    _IP, ?MAX_COUNT) ->
+    Rid;
+handle_auth(Sid, Rid, 
+	    Attrs, Payload, 
+	    PayloadSize, 
+	    StreamStart, 
+	    IP, Count) ->
+    %% wait to make sure we had auth success.
+    case handle_http_put(Sid, Rid, Attrs, 
+			 Payload, PayloadSize, 
+			 StreamStart, IP) of
+	{ok, [{xmlstreamelement,
+	       {xmlelement,"success",
+		[{"xmlns","urn:ietf:params:xml:ns:xmpp-sasl"}],
+		[]}}]} ->
+	    Rid;
+	{ok, _Els} ->
+	    error_logger:info_msg("Auth Success? ~p ~n", [_Els]),
+	    timer:sleep(100),
+	    handle_auth(Sid, Rid+1, Attrs, Payload, 
+			PayloadSize, StreamStart, IP, Count+1);
+	_ ->
+	    Rid
+    end.
+handle_bind(_, Rid, _, ?MAX_COUNT) ->
+    {Rid, {200,
+	   [{"Content-Type","text/xml; charset=utf-8"}],
+	   []}};
+handle_bind(Sid, Rid, IP, Count) ->
+    BindAttrs = [{"rid",integer_to_list(Rid)},
+		 {"xmlns",?NS_HTTP_BIND},
+		 {"sid",Sid}],
+    BindPayload = [{xmlelement,"iq",
+		   [{"type","set"},
+		    {"id","_bind_auth_2"},
+		    {"xmlns","jabber:client"}],
+		   [{xmlelement,"bind",
+		     [{"xmlns",
+		       "urn:ietf:params:xml:ns:xmpp-bind"}],[]}]}],
+    BindPayloadSize = 228,
+    {ok, Retval0} = handle_http_put(Sid,
+                                    Rid,
+                                    BindAttrs,
+                                    BindPayload,
+                                    BindPayloadSize,
+                                    false,
+                                    IP),
+    ?DEBUG("Retval ~p ~n",[Retval0]),
+    Els = [OEl || {xmlstreamelement, OEl} <- Retval0],
+    case lists:any(fun({xmlelement, "iq", _, _}) ->
+			   true;
+		      (_) ->
+			   false
+		   end, Els) of 
+	true ->
+	    XmlElementString = xml:element_to_string({xmlelement,"body",
+						      [{"xmlns",
+							?NS_HTTP_BIND}] ++ 
+						      [{"sid",Sid}] ++ 
+						      [{"rid",integer_to_list(Rid+1)}],
+						      Els}),
+	    {Rid, {200,
+		   [{"Content-Type","text/xml; charset=utf-8"}],
+		   XmlElementString}};
+	false ->
+	    handle_bind(Sid, Rid+1, IP, Count+1)
     end.
 
 %% Entry point for data coming from client through ejabberd HTTP server:
@@ -82,14 +174,15 @@ process_request(Data, IP) ->
 		    {"mechanism","ANONYMOUS"}],
 		   []}],
     AuthPayloadSize = 191,
-    handle_http_put(Sid, 
-                    Rid+1, 
-                    AuthAttrs, 
-                    AuthPayload, 
-                    AuthPayloadSize, 
-                    false, 
-                    IP),
-    StreamAttrs = [{"rid",integer_to_list(Rid+2)},
+    RidA = handle_auth(Sid, 
+		       Rid+1, 
+		       AuthAttrs, 
+		       AuthPayload, 
+		       AuthPayloadSize, 
+		       false, 
+		       IP,
+		       0),
+    StreamAttrs = [{"rid",integer_to_list(RidA+1)},
 		   {"sid",Sid},
 		   {"xmlns",?NS_HTTP_BIND},
 		   {"xml:lang","en"},
@@ -97,38 +190,15 @@ process_request(Data, IP) ->
 		   {"to",XmppDomain},
 		   {"xmpp:restart","true"}],
     handle_http_put(Sid,
-                    Rid+2,
+                    RidA+1,
                     StreamAttrs,
                     [],
                     191,
                     true,
                     IP),
-    BindAttrs = [{"rid",integer_to_list(Rid+3)},
-		 {"xmlns",?NS_HTTP_BIND},
-		 {"sid",Sid}],
-    BindPayload = [{xmlelement,"iq",
-		   [{"type","set"},
-		    {"id","_bind_auth_2"},
-		    {"xmlns","jabber:client"}],
-		   [{xmlelement,"bind",
-		     [{"xmlns",
-		       "urn:ietf:params:xml:ns:xmpp-bind"}],[]}]}],
-    BindPayloadSize = 228,
-    {_,_,Retval0} = handle_http_put(Sid,
-                                    Rid+3,
-                                    BindAttrs,
-                                    BindPayload,
-                                    BindPayloadSize,
-                                    false,
-                                    IP),
-    {xmlelement,"body",RetAttrs,Els} = xml_stream:parse_element(Retval0),
-    XmlElementString = xml:element_to_string({xmlelement,"body",
-					      RetAttrs ++ [{"sid",Sid}] ++ [{"rid",integer_to_list(Rid+4)}],
-					      Els}),
-    Retval = {200,
-	      [{"Content-Type","text/xml; charset=utf-8"}],
-	      XmlElementString},
-    SessionAttrs = [{"rid",integer_to_list(Rid+4)},
+    {RidB, Retval} = handle_bind(Sid, RidA+2, IP, 0),
+    
+    SessionAttrs = [{"rid",integer_to_list(RidB+1)},
 		    {"xmlns",?NS_HTTP_BIND},
 		    {"sid",Sid}],
     SessionPayload = [{xmlelement,"iq",
@@ -140,7 +210,7 @@ process_request(Data, IP) ->
 			   "urn:ietf:params:xml:ns:xmpp-session"}],[]}]}],
     SessionPayloadSize = 228,
     handle_http_put(Sid, 
-                    Rid+4,
+                    RidB+1,
                     SessionAttrs,
                     SessionPayload,
                     SessionPayloadSize,
@@ -172,3 +242,4 @@ parse_request(Data) ->
 	    ?ERROR_MSG("Error with parse. ~p",[_Reason]),
             {error, bad_request}
     end.
+
