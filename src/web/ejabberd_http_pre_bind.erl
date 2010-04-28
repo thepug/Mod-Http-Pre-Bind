@@ -29,11 +29,11 @@ handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) ->
     case ejabberd_http_bind:http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
         {error, not_exists} ->
             ?DEBUG("no session associated with sid: ~p", [Sid]),
-            {404, ?HEADER, ""};
+            {error, not_exists};
         {{error, Reason}, _Sess} ->
             ?DEBUG("Error on HTTP put. Reason: ~p", [Reason]),
             %% ignore errors
-            {200, ?HEADER, "<body xmlns='"++?NS_HTTP_BIND++"'/>"}; 
+            {ok, []};
         {{wait, Pause}, _Sess} ->
 	    ?DEBUG("Trafic Shaper: Delaying request ~p", [Rid]),
 	    timer:sleep(Pause),
@@ -41,11 +41,12 @@ handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) ->
 			    StreamStart, IP);
         {buffered, _Sess} ->
             ?DEBUG("buffered", []),
-            {200, ?HEADER, "<body xmlns='"++?NS_HTTP_BIND++"'/>"};
+	    {ok, []};
         {ok, Sess} ->
             handle_response(Sess, Rid);
 	Out ->
-	    ?ERROR_MSG("Handle Put was invalid : ~p ~n", [Out])
+	    ?ERROR_MSG("Handle Put was invalid : ~p ~n", [Out]),
+	    {error, undefined}
     end.
 
 
@@ -87,7 +88,6 @@ handle_auth(Sid, Rid,
 		[]}}]} ->
 	    Rid;
 	{ok, _Els} ->
-	    error_logger:info_msg("Auth Success? ~p ~n", [_Els]),
 	    timer:sleep(100),
 	    handle_auth(Sid, Rid+1, Attrs, Payload, 
 			PayloadSize, StreamStart, IP, Count+1);
