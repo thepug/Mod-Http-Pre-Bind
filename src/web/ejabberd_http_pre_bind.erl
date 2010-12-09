@@ -220,8 +220,8 @@ process_request(Data, IP) ->
 
 code_change(_OldVsn, StateName, StateData, _Extra) ->
     {ok, StateName, StateData}.
+
 %% Parse the initial client request to start the pre bind session.
-%% TODO: add real user support
 parse_request(Data) ->
     case xml_stream:parse_element(Data) of
         {xmlelement, "body", Attrs, _Els} ->
@@ -230,10 +230,13 @@ parse_request(Data) ->
 		    ?ERROR_MSG("error in body ~p",["Exit"]),
 		    {error, bad_request};
 		Rid ->
+            Jid = xml:get_attr_s("from", Attrs),
 		    XmppDomain = xml:get_attr_s("to",Attrs),
-		    RetAttrs = [{"wait",xml:get_attr_s("wait",Attrs)},
-				{"hold",xml:get_attr_s("hold",Attrs)}],
-		    {ok, {Rid, XmppDomain,RetAttrs}}
+		    RetAttrs = [
+              {"wait",xml:get_attr_s("wait",Attrs)},
+			  {"hold",xml:get_attr_s("hold",Attrs)}
+            ],
+		    {ok, {Rid, Jid, XmppDomain, RetAttrs}}
 	    end;
 	{xmlelement, _Name, _Attrs, _Els} ->
 	    ?ERROR_MSG("Not a body ~p",[_Name]),
