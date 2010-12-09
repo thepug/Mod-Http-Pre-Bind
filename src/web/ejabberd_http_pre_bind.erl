@@ -9,7 +9,7 @@
 
 
 %% External exports
--export([code_change/4,
+-export([code_change/3,
 	 process_request/2]).
 
 -include("ejabberd.hrl").
@@ -218,8 +218,8 @@ process_request(Data, IP) ->
                     IP),
     Retval.
 
-code_change(_OldVsn, StateName, StateData, _Extra) ->
-    {ok, StateName, StateData}.
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
 
 %% Parse the initial client request to start the pre bind session.
 parse_request(Data) ->
