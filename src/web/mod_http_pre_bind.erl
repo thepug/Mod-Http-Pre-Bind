@@ -70,7 +70,7 @@ process([], #request{method = 'GET',
                 },
                 #xmlel{name = p, children = [
                     #xmlcdata{cdata = <<"An implementation of">>},
-                    #xmlel{name = a, attrs = [#xmlattr{name = href, value = <<"http://www.xmpp.org/extensions/xep-0206.html">>}], children = [
+                    #xmlel{name = a, attrs = [#xmlattr{name = <<"href">>, value = <<"http://www.xmpp.org/extensions/xep-0206.html">>}], children = [
                         #xmlcdata{cdata = <<"Pre-Bind XMPP over BOSH (XEP-0206)">>}
                       ]
                     }
