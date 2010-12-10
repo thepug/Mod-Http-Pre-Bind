@@ -141,88 +141,26 @@ handle_bind(Sid, Rid, IP, Count) ->
       handle_bind(Sid, Rid+1, IP, Count+1)
   end.
 
-%% Entry point for data coming from client through ejabberd HTTP server:
+%% Entry point for data coming from client through ejabberd HTTP server
 process_request(Data, IP) ->
-  {ok,{Rid,XmppDomain,Attrs}} = parse_request(Data),
+  %% Parse incoming data.
+  {ok, {Rid, Jid, XmppDomain, Attrs}} = parse_request(Data),
+
+  %% Start a session
   Sid = sha:sha(term_to_binary({now(), make_ref()})),
-  {ok, Pid} = ejabberd_http_bind:start(XmppDomain, Sid, "", IP),
-  StartAttrs = [{"rid",Rid},
-    {"to",XmppDomain},
-    {"xmlns",?NS_HTTP_BIND},
-    {"xml:lang","en"},
-    {"xmpp:version","1.0"},
-    {"ver","1.6"},
-    {"xmlns:xmpp","urn:xmpp:bosh"},
-    {"window","5"},
-    {"content","text/xml"},
-    {"charset","utf-8"}],
-  StartAttrs0 = lists:append(StartAttrs,Attrs),
-  Payload = [],
-  PayloadSize = 0,
-  ejabberd_http_bind:handle_session_start(Pid,
-    XmppDomain,
-    Sid,
-    Rid,
-    StartAttrs0,
-    Payload,
-    PayloadSize,
-    IP),
-  %After session start, send the anonymous authentication mechanism.
-  AuthAttrs = [{"rid",integer_to_list(Rid+1)},
-    {"xmlns",?NS_HTTP_BIND},
-    {"sid",Sid}],
-  AuthPayload = [{xmlelement,
-      "auth",
-      [{"xmlns","urn:ietf:params:xml:ns:xmpp-sasl"},
-        {"mechanism","ANONYMOUS"}],
-      []}],
-  AuthPayloadSize = 191,
-  RidA = handle_auth(Sid, 
-    Rid+1, 
-    AuthAttrs, 
-    AuthPayload, 
-    AuthPayloadSize, 
-    false, 
-    IP,
-    0),
-  StreamAttrs = [{"rid",integer_to_list(RidA+1)},
-    {"sid",Sid},
-    {"xmlns",?NS_HTTP_BIND},
-    {"xml:lang","en"},
-    {"xmlns:xmpp","urn:xmpp:xbosh"},
-    {"to",XmppDomain},
-    {"xmpp:restart","true"}],
-  handle_http_put(Sid,
-    RidA+1,
-    StreamAttrs,
-    [],
-    191,
-    true,
-    IP),
-  {RidB, Retval} = handle_bind(Sid, RidA+2, IP, 0),
+  start_http_bind(Sid, IP, Rid, Jid, XmppDomain, Attrs),
+  
+  %% Authenticate, depending on if from is 'anonymous' or an actual Jid.
+  %% If the message is from "anonymous", SASL Anonymous is used, otherwise SASL Plain.
+  RidA = start_auth(Sid, IP, Rid + 1, Jid),
 
-  SessionAttrs = [{"rid",integer_to_list(RidB+1)},
-    {"xmlns",?NS_HTTP_BIND},
-    {"sid",Sid}],
-  SessionPayload = [{xmlelement,"iq",
-      [{"type","set"},
-        {"id","_session_auth_2"},
-        {"xmlns","jabber:client"}],
-      [{xmlelement,"session",
-          [{"xmlns",
-              "urn:ietf:params:xml:ns:xmpp-session"}],[]}]}],
-  SessionPayloadSize = 228,
-  handle_http_put(Sid, 
-    RidB+1,
-    SessionAttrs,
-    SessionPayload,
-    SessionPayloadSize,
-    false,
-    IP),
+  %% Start the XMPP Stream.
+  {RidB, Retval} = start_stream(Sid, IP, RidA + 1, XmppDomain),
+
+  %% Start the XMPP Session.
+  start_session(Sid, IP, RidB + 1),
+
   Retval.
-
-code_change(_OldVsn, State, _Extra) ->
-  {ok, State}.
 
 %% Parse the initial client request to start the pre bind session.
 parse_request(Data) ->
@@ -249,3 +187,76 @@ parse_request(Data) ->
       {error, bad_request}
   end.
 
+start_http_bind(Sid, IP, Rid, Jid, XmppDomain, Attrs) ->
+  {ok, Pid} = ejabberd_http_bind:start(XmppDomain, Sid, "", IP),
+  StartAttrs = [
+    {"rid", Rid},
+    {"from", Jid},
+    {"to", XmppDomain},
+    {"xmlns",?NS_HTTP_BIND},
+    {"xml:lang","en"},
+    {"xmpp:version","1.0"},
+    {"ver","1.6"},
+    {"xmlns:xmpp","urn:xmpp:bosh"},
+    {"window","5"},
+    {"content","text/xml"},
+    {"charset","utf-8"}
+  ],
+  StartAttrsL = lists:append(StartAttrs, Attrs),
+  ejabberd_http_bind:handle_session_start(Pid, XmppDomain, Sid, Rid, StartAttrsL, [], 0, IP).
+
+start_auth(Sid, IP, Rid, Jid) ->
+  Attrs = {ok , [
+    {"rid", integer_to_list(Rid)},
+    {"xmlns", ?NS_HTTP_BIND},
+    {"sid", Sid}
+  ]},
+  Payload = [{xmlelement,
+      "auth",
+      [{"xmlns", "urn:ietf:params:xml:ns:xmpp-sasl"},
+        {"mechanism", auth_mechanism(Jid)}],
+      []}],
+  PayloadSize = iolist_size(Payload),
+  RidA = handle_auth(Sid, Rid, Attrs, Payload, PayloadSize, false, IP, 0),
+  RidA.
+  
+auth_mechanism(Jid) ->
+  case Jid of
+    "anonymous" ->
+      "ANONYMOUS";
+    _ ->
+      "PLAIN"
+  end.
+
+start_stream(Sid, IP, Rid, XmppDomain) ->
+  Attrs = [
+    {"rid", integer_to_list(Rid)},
+    {"sid", Sid},
+    {"xmlns", ?NS_HTTP_BIND},
+    {"xml:lang", "en"},
+    {"xmlns:xmpp", "urn:xmpp:xbosh"},
+    {"to", XmppDomain},
+    {"xmpp:restart", "true"}
+  ],
+  handle_http_put(Sid, Rid, Attrs, [], iolist_size(Attrs), true, IP),
+  {RidB, Retval} = handle_bind(Sid, Rid + 1, IP, 0),
+  {RidB, Retval}.
+
+start_session(Sid, IP, Rid) ->
+  Attrs = [
+    {"rid", integer_to_list(Rid)},
+    {"xmlns", ?NS_HTTP_BIND},
+    {"sid", Sid}
+  ],
+ Payload = [{xmlelement,"iq",
+      [{"type","set"},
+        {"id","_session_auth_2"},
+        {"xmlns","jabber:client"}],
+      [{xmlelement,"session",
+          [{"xmlns",
+              "urn:ietf:params:xml:ns:xmpp-session"}],[]}]}],
+  PayloadSize = iolist_size(Payload),
+  handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, false, IP).
+
+code_change(_OldVsn, State, _Extra) ->
+  {ok, State}.
