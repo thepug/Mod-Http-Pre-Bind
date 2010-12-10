@@ -22,6 +22,8 @@
     process/2
   ]).
 
+-include_lib("exmpp/include/exmpp.hrl").
+
 -include("ejabberd.hrl").
 -include("jlib.hrl").
 -include("ejabberd_http.hrl").
@@ -34,8 +36,12 @@
 process([], #request{method = 'POST',
     data = []}) ->
   ?DEBUG("Bad Request: no data", []),
-  {400, [], {xmlelement, "h1", [],
-      [{xmlcdata, "400 Bad Request"}]}};
+  {400, [], 
+    #xmlel{name = h1, children = [
+        #xmlcdata{cdata = <<"400 Bad Request">>}
+      ]
+    }
+  };
 
 process([], #request{method = 'POST',
     data = Data,
@@ -45,23 +51,47 @@ process([], #request{method = 'POST',
 
 process([], #request{method = 'GET',
     data = []}) ->
+  ?DEBUG("Returning HTML", []),
   Heading = "Ejabberd " ++ atom_to_list(?MODULE) ++ " v" ++ ?MOD_HTTP_PRE_BIND_VERSION,
-  {xmlelement, "html", [{"xmlns", "http://www.w3.org/1999/xhtml"}],
-    [{xmlelement, "head", [],
-        [{xmlelement, "title", [], [{xmlcdata, Heading}]}]},
-      {xmlelement, "body", [],
-        [{xmlelement, "h1", [], [{xmlcdata, Heading}]},
-          {xmlelement, "p", [],
-            [{xmlcdata, "An implementation of "},
-              {xmlelement, "a", [{"href", "http://www.xmpp.org/extensions/xep-0206.html"}],
-                [{xmlcdata, "Pre-Bind XMPP over BOSH (XEP-0206)"}]}]}
-        ]}]};
+  {200, [], 
+    #xmlel{name = html, attrs = [#xmlattr{name = <<"xmlns">>, value = <<"http://www.w3.org/1999/xhtml">>}], children = [
+        #xmlel{name = head, children = [
+            #xmlel{name = title, children = [
+                #xmlcdata{cdata = Heading}
+              ]
+            }
+          ]
+        },
+        #xmlel{name = body, children = [
+            #xmlel{name = body, children = [
+                #xmlel{name = h1, children = [
+                    #xmlcdata{cdata = Heading}
+                  ]
+                },
+                #xmlel{name = p, children = [
+                    #xmlcdata{cdata = <<"An implementation of">>},
+                    #xmlel{name = a, attrs = [#xmlattr{name = href, value = <<"http://www.xmpp.org/extensions/xep-0206.html">>}], children = [
+                        #xmlcdata{cdata = <<"Pre-Bind XMPP over BOSH (XEP-0206)">>}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  };
 
 process(_Path, _Request) ->
   ?DEBUG("Bad Request: ~p", [_Request]),
-  {400, [], {xmlelement, "h1", [],
-      [{xmlcdata, "400 Bad Request"}]}}.
-
+  {400, [], 
+    #xmlel{name = h1, children = [
+        #xmlcdata{cdata = <<"400 Bad Request">>}
+      ]
+    }
+  }.
 
 %%%----------------------------------------------------------------------
 %%% BEHAVIOUR CALLBACKS
