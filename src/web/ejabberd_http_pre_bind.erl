@@ -6,18 +6,15 @@
 
 -module(ejabberd_http_pre_bind).
 
-
-
 %% External exports
 -export([code_change/3,
     process_request/2]).
 
+-include_lib("exmpp/include/exmpp.hrl").
+
 -include("ejabberd.hrl").
--include("jlib.hrl").
 -include("ejabberd_http.hrl").
 
-
--define(NS_HTTP_BIND, "http://jabber.org/protocol/httpbind").
 -define(HEADER, [{"Content-Type", "text/xml; charset=utf-8"}, 
     {"Access-Control-Allow-Origin", "*"}, 
     {"Access-Control-Allow-Headers", "Content-Type"}]).
@@ -164,26 +161,26 @@ process_request(Data, IP) ->
 
 %% Parse the initial client request to start the pre bind session.
 parse_request(Data) ->
-  case xml_stream:parse_element(Data) of
-    {xmlelement, "body", Attrs, _Els} ->
-      case catch list_to_integer(xml:get_attr_s("rid", Attrs)) of
-        {'EXIT', _} ->
+  case exmpp_xmlstream:parse_element(Data) of
+    #xmlel{name = body, attrs = Attrs, children = _Children} ->
+      case catch list_to_integer(exmpp_xml:get_attribute_from_list(Attrs, <<"rid">>, error)) of
+        error ->
           ?ERROR_MSG("error in body ~p",["Exit"]),
           {error, bad_request};
         Rid ->
-          Jid = xml:get_attr_s("from", Attrs),
-          XmppDomain = xml:get_attr_s("to",Attrs),
+          Jid = exmpp_xml:get_attribute_from_list(Attrs, <<"from">>, error),
+          XmppDomain = exmpp_xml:get_attribute_from_list(Attrs, <<"to">>, error),
           RetAttrs = [
-            {"wait",xml:get_attr_s("wait",Attrs)},
-            {"hold",xml:get_attr_s("hold",Attrs)}
+            {"wait", exmpp_xml:get_attribute_from_list(Attrs, <<"wait">>, error)},
+            {"hold", exmpp_xml:get_attribute_from_list(Attrs, <<"hold">>, error)}
           ],
           {ok, {Rid, Jid, XmppDomain, RetAttrs}}
       end;
-    {xmlelement, _Name, _Attrs, _Els} ->
-      ?ERROR_MSG("Not a body ~p",[_Name]),
+    #xmlel{name = Name, attrs = _Attrs, children = _Children} ->
+      ?ERROR_MSG("Not a body ~p",[Name]),
       {error, bad_request};
-    {error, _Reason} ->
-      ?ERROR_MSG("Error with parse. ~p",[_Reason]),
+    _ ->
+      ?ERROR_MSG("Error with parse.",[]),
       {error, bad_request}
   end.
 

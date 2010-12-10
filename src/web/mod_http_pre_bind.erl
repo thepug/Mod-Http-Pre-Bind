@@ -12,7 +12,7 @@
 -module(mod_http_pre_bind).
 -author('nathan@collecta.com').
 
--define(MOD_HTTP_PRE_BIND_VERSION, "0.1").
+-define(MOD_HTTP_PRE_BIND_VERSION, "0.2").
 
 -behaviour(gen_mod).
 
@@ -25,9 +25,7 @@
 -include_lib("exmpp/include/exmpp.hrl").
 
 -include("ejabberd.hrl").
--include("jlib.hrl").
 -include("ejabberd_http.hrl").
-
 
 %%%----------------------------------------------------------------------
 %%% API
