@@ -12,6 +12,7 @@
 
 -include_lib("exmpp/include/exmpp.hrl").
 
+-include("ejabberd_http_pre_bind.hrl").
 -include("ejabberd.hrl").
 -include("ejabberd_http.hrl").
 
@@ -162,7 +163,7 @@ process_request(Data, IP) ->
 %% Parse the initial client request to start the pre bind session.
 parse_request(Data) ->
   case exmpp_xmlstream:parse_element(Data) of
-    #xmlel{name = body, attrs = Attrs, children = _Children} ->
+    [#xmlel{name = body, attrs = Attrs, children = _Children}] ->
       case catch list_to_integer(exmpp_xml:get_attribute_from_list(Attrs, <<"rid">>, error)) of
         error ->
           ?ERROR_MSG("error in body ~p",["Exit"]),
@@ -176,12 +177,12 @@ parse_request(Data) ->
           ],
           {ok, {Rid, Jid, XmppDomain, RetAttrs}}
       end;
-    #xmlel{name = Name, attrs = _Attrs, children = _Children} ->
+    [#xmlel{name = Name, attrs = _Attrs, children = _Children}] ->
       ?ERROR_MSG("Not a body ~p",[Name]),
-      {error, bad_request};
+      ?MOD_HTTP_PRE_BIND_BAD_REQUEST;
     _ ->
       ?ERROR_MSG("Error with parse.",[]),
-      {error, bad_request}
+      ?MOD_HTTP_PRE_BIND_BAD_REQUEST
   end.
 
 start_http_bind(Sid, IP, Rid, Jid, XmppDomain, Attrs) ->

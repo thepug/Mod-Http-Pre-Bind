@@ -12,8 +12,6 @@
 -module(mod_http_pre_bind).
 -author('nathan@collecta.com').
 
--define(MOD_HTTP_PRE_BIND_VERSION, "0.2").
-
 -behaviour(gen_mod).
 
 -export([
@@ -24,6 +22,7 @@
 
 -include_lib("exmpp/include/exmpp.hrl").
 
+-include("ejabberd_http_pre_bind.hrl").
 -include("ejabberd.hrl").
 -include("ejabberd_http.hrl").
 
@@ -34,12 +33,7 @@
 process([], #request{method = 'POST',
     data = []}) ->
   ?DEBUG("Bad Request: no data", []),
-  {400, [], 
-    #xmlel{name = h1, children = [
-        #xmlcdata{cdata = <<"400 Bad Request">>}
-      ]
-    }
-  };
+  ?MOD_HTTP_PRE_BIND_BAD_REQUEST;
 
 process([], #request{method = 'POST',
     data = Data,
@@ -84,12 +78,7 @@ process([], #request{method = 'GET',
 
 process(_Path, _Request) ->
   ?DEBUG("Bad Request: ~p", [_Request]),
-  {400, [], 
-    #xmlel{name = h1, children = [
-        #xmlcdata{cdata = <<"400 Bad Request">>}
-      ]
-    }
-  }.
+  ?MOD_HTTP_PRE_BIND_BAD_REQUEST.
 
 %%%----------------------------------------------------------------------
 %%% BEHAVIOUR CALLBACKS
