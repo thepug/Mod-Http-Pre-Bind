@@ -48,6 +48,7 @@ handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) ->
   end.
 
 handle_response(Sess, Rid) ->
+  ?DEBUG("Handling response.", []),
   case catch ejabberd_http_bind:http_get(Sess, Rid) of
     {ok, cancel} ->
       {ok, cancel};
@@ -88,8 +89,8 @@ handle_auth(Sid, Rid,
       Rid;
     {ok, _Els} ->
       timer:sleep(100),
-      handle_auth(Sid, Rid+1, Attrs, Payload, 
-        PayloadSize, StreamStart, IP, Count+1);
+      handle_auth(Sid, Rid + 1, Attrs, Payload, 
+        PayloadSize, StreamStart, IP, Count + 1);
     _ ->
       Rid
   end.
@@ -137,7 +138,7 @@ handle_bind(Sid, Rid, IP, Count) ->
           [{"Content-Type","text/xml; charset=utf-8"}],
           XmlElementString}};
     false ->
-      handle_bind(Sid, Rid+1, IP, Count+1)
+      handle_bind(Sid, Rid + 1, IP, Count + 1)
   end.
 
 %% Entry point for data coming from client through ejabberd HTTP server
@@ -146,8 +147,8 @@ process_request(Data, IP) ->
   {ok, {Rid, Jid, XmppDomain, Attrs}} = parse_request(Data),
 
   %% Start a session
-  Sid = sha:sha(term_to_binary({now(), make_ref()})),
-  start_http_bind(Sid, IP, Rid, Jid, XmppDomain, Attrs),
+  Sid = ejabberd_http_bind:make_sid(),
+  start_http_bind(Sid, IP, Rid, XmppDomain, Attrs),
 
   %% Authenticate, depending on if from is 'anonymous' or an actual Jid.
   %% If the message is from "anonymous", SASL Anonymous is used, otherwise SASL Plain.
@@ -165,16 +166,16 @@ process_request(Data, IP) ->
 parse_request(Data) ->
   case exmpp_xmlstream:parse_element(Data) of
     [#xmlel{name = body, attrs = Attrs, children = _Children}] ->
-      case catch list_to_integer(binary_to_list(exmpp_xml:get_attribute_from_list(Attrs, <<"rid">>, error))) of
+      case catch list_to_integer(exmpp_xml:get_attribute_from_list_as_list(Attrs, <<"rid">>, error)) of
         {'EXIT', Reason} ->
           ?ERROR_MSG("error in body ~p",[Reason]),
           ?MOD_HTTP_PRE_BIND_BAD_REQUEST;
         Rid ->
-          Jid = binary_to_list(exmpp_xml:get_attribute_from_list(Attrs, <<"from">>, error)),
-          XmppDomain = binary_to_list(exmpp_xml:get_attribute_from_list(Attrs, <<"to">>, error)),
+          Jid = exmpp_xml:get_attribute_from_list_as_list(Attrs, <<"from">>, error),
+          XmppDomain = exmpp_xml:get_attribute_from_list_as_list(Attrs, <<"to">>, error),
           RetAttrs = [
-            {"wait", binary_to_list(exmpp_xml:get_attribute_from_list(Attrs, <<"wait">>, error))},
-            {"hold", binary_to_list(exmpp_xml:get_attribute_from_list(Attrs, <<"hold">>, error))}
+            {"wait", exmpp_xml:get_attribute_from_list_as_list(Attrs, <<"wait">>, error)},
+            {"hold", exmpp_xml:get_attribute_from_list_as_list(Attrs, <<"hold">>, error)}
           ],
           {ok, {Rid, Jid, XmppDomain, RetAttrs}}
       end;
@@ -186,25 +187,26 @@ parse_request(Data) ->
       ?MOD_HTTP_PRE_BIND_BAD_REQUEST
   end.
 
-start_http_bind(Sid, IP, Rid, Jid, XmppDomain, Attrs) ->
+start_http_bind(Sid, IP, Rid, XmppDomain, Attrs) ->
+  ?DEBUG("start_http_bind, Rid: ~p", [Rid]),
   {ok, Pid} = ejabberd_http_bind:start(XmppDomain, Sid, "", IP),
   StartAttrs = [
     {"rid", Rid},
-    {"from", Jid},
     {"to", XmppDomain},
-    {"xmlns",?NS_HTTP_BIND},
-    {"xml:lang","en"},
-    {"xmpp:version","1.0"},
-    {"ver","1.6"},
-    {"xmlns:xmpp","urn:xmpp:bosh"},
-    {"window","5"},
-    {"content","text/xml"},
-    {"charset","utf-8"}
+    {"xmlns", ?NS_HTTP_BIND},
+    {"xml:lang", "en"},
+    {"xmpp:version", "1.0"},
+    {"ver", "1.6"},
+    {"xmlns:xmpp", "urn:xmpp:bosh"},
+    {"window", "5"},
+    {"content", "text/xml"},
+    {"charset", "utf-8"}
   ],
   StartAttrsL = lists:append(StartAttrs, Attrs),
   ejabberd_http_bind:handle_session_start(Pid, XmppDomain, Sid, Rid, StartAttrsL, [], 0, IP).
 
 start_auth(Sid, IP, Rid, Jid) ->
+  ?DEBUG("start_auth Rid: ~p", [Rid]),
   Attrs = {ok , [
       {"rid", integer_to_list(Rid)},
       {"xmlns", ?NS_HTTP_BIND},
