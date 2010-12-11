@@ -100,7 +100,8 @@ handle_bind(_, Rid, _, ?MAX_COUNT) ->
       []}};
 
 handle_bind(Sid, Rid, IP, Count) ->
-  BindAttrs = [{"rid",integer_to_list(Rid)},
+  BindAttrs = [
+    {"rid",integer_to_list(Rid)},
     {"xmlns",?NS_HTTP_BIND},
     {"sid",Sid}],
   BindPayload = [{xmlelement,"iq",
@@ -147,7 +148,7 @@ process_request(Data, IP) ->
   %% Start a session
   Sid = sha:sha(term_to_binary({now(), make_ref()})),
   start_http_bind(Sid, IP, Rid, Jid, XmppDomain, Attrs),
-  
+
   %% Authenticate, depending on if from is 'anonymous' or an actual Jid.
   %% If the message is from "anonymous", SASL Anonymous is used, otherwise SASL Plain.
   RidA = start_auth(Sid, IP, Rid + 1, Jid),
@@ -164,16 +165,16 @@ process_request(Data, IP) ->
 parse_request(Data) ->
   case exmpp_xmlstream:parse_element(Data) of
     [#xmlel{name = body, attrs = Attrs, children = _Children}] ->
-      case catch list_to_integer(exmpp_xml:get_attribute_from_list(Attrs, <<"rid">>, error)) of
-        error ->
-          ?ERROR_MSG("error in body ~p",["Exit"]),
-          {error, bad_request};
+      case catch list_to_integer(binary_to_list(exmpp_xml:get_attribute_from_list(Attrs, <<"rid">>, error))) of
+        {'EXIT', Reason} ->
+          ?ERROR_MSG("error in body ~p",[Reason]),
+          ?MOD_HTTP_PRE_BIND_BAD_REQUEST;
         Rid ->
-          Jid = exmpp_xml:get_attribute_from_list(Attrs, <<"from">>, error),
-          XmppDomain = exmpp_xml:get_attribute_from_list(Attrs, <<"to">>, error),
+          Jid = binary_to_list(exmpp_xml:get_attribute_from_list(Attrs, <<"from">>, error)),
+          XmppDomain = binary_to_list(exmpp_xml:get_attribute_from_list(Attrs, <<"to">>, error)),
           RetAttrs = [
-            {"wait", exmpp_xml:get_attribute_from_list(Attrs, <<"wait">>, error)},
-            {"hold", exmpp_xml:get_attribute_from_list(Attrs, <<"hold">>, error)}
+            {"wait", binary_to_list(exmpp_xml:get_attribute_from_list(Attrs, <<"wait">>, error))},
+            {"hold", binary_to_list(exmpp_xml:get_attribute_from_list(Attrs, <<"hold">>, error))}
           ],
           {ok, {Rid, Jid, XmppDomain, RetAttrs}}
       end;
@@ -205,17 +206,15 @@ start_http_bind(Sid, IP, Rid, Jid, XmppDomain, Attrs) ->
 
 start_auth(Sid, IP, Rid, Jid) ->
   Attrs = {ok , [
-    {"rid", integer_to_list(Rid)},
-    {"xmlns", ?NS_HTTP_BIND},
-    {"sid", Sid}
-  ]},
-  Payload = [{xmlelement,
-      "auth",
-      [{"xmlns", "urn:ietf:params:xml:ns:xmpp-sasl"},
-        {"mechanism", auth_mechanism(Jid)}],
-      []}],
-  PayloadSize = iolist_size(Payload),
-  RidA = handle_auth(Sid, Rid, Attrs, Payload, PayloadSize, false, IP, 0),
+      {"rid", integer_to_list(Rid)},
+      {"xmlns", ?NS_HTTP_BIND},
+      {"sid", Sid}
+    ]},
+  Payload = #xmlel{name = <<"auth">>, attrs = [
+        #xmlattr{name = <<"xmlns">>, value = <<"urn:ietf:params:xml:ns:xmpp-sasl">>},
+        #xmlattr{name = <<"mechanism">>, value = list_to_binary(auth_mechanism(Jid))}
+      ]},
+  RidA = handle_auth(Sid, Rid, Attrs, Payload, 0, false, IP, 0),
   RidA.
   
 auth_mechanism(Jid) ->
@@ -236,7 +235,7 @@ start_stream(Sid, IP, Rid, XmppDomain) ->
     {"to", XmppDomain},
     {"xmpp:restart", "true"}
   ],
-  handle_http_put(Sid, Rid, Attrs, [], iolist_size(Attrs), true, IP),
+  handle_http_put(Sid, Rid, Attrs, [], 0, true, IP),
   {RidB, Retval} = handle_bind(Sid, Rid + 1, IP, 0),
   {RidB, Retval}.
 
