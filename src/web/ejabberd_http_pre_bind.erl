@@ -212,7 +212,7 @@ start_auth(Sid, IP, Rid, Jid) ->
       {"xmlns", ?NS_HTTP_BIND},
       {"sid", Sid}
     ]},
-  Payload = #xmlel{name = <<"auth">>, attrs = [
+  Payload = #xmlel{name = auth, attrs = [
         #xmlattr{name = <<"xmlns">>, value = <<"urn:ietf:params:xml:ns:xmpp-sasl">>},
         #xmlattr{name = <<"mechanism">>, value = list_to_binary(auth_mechanism(Jid))}
       ]},
