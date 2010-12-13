@@ -69,26 +69,19 @@ parse_request(Data) ->
   end.
 
 start_http_bind(Sid, IP, Rid, XmppDomain, Attrs) ->
-  ?DEBUG("start_http_bind, Rid: ~p", [Rid]),
   {ok, Pid} = ejabberd_http_bind:start(XmppDomain, Sid, "", IP),
-  StartAttrs = [
-    #xmlattr{name = <<"rid">>, value = <<Rid>>},
-    #xmlattr{name = <<"to">>, value = <<XmppDomain>>},
-    #xmlattr{name = <<"xmlns">>, value = <<?NS_HTTP_BIND>>},
-    #xmlattr{name = <<"xml:lang">>, value = <<"en">>},
-    #xmlattr{name = <<"xmpp:version">>, value = <<"1.0">>},
-    #xmlattr{name = <<"ver">>, value = <<"1.6">>},
-    #xmlattr{name = <<"xmlns:xmpp">>, value = <<"urn:xmpp:bosh">>},
-    #xmlattr{name = <<"window">>, value = <<"5">>},
-    #xmlattr{name = <<"content">>, value = <<"text/xml">>},
-    #xmlattr{name = <<"charset">>, value = <<"utf-8">>}
+  StartAttrsXml = [
+    exmpp_xml:attribute(<<"rid">>, Rid),
+    exmpp_xml:attribute(<<"to">>, XmppDomain),
+    exmpp_xml:attribute(?NS_XML, <<"lang">>, <<"en">>),
+    exmpp_xml:attribute(<<"content">>, <<"text/xml; charset=utf-8">>),
+    exmpp_xml:attribute(<<"window">>, <<"5">>),
+    exmpp_xml:attribute(<<"ver">>, <<"1.6">>),
+    exmpp_xml:attribute(?NS_BOSH, <<"version">>, <<"1.0">>)
   ],
-  AttrsXml = map(fun(X) -> 
-        {Key, Value} = X,
-        exmpp_xml:attribute(Key, Value)
-    end, Attrs),
-  StartAttrsXml = lists:append(StartAttrs, AttrsXml),
-  ejabberd_http_bind:handle_session_start(Pid, XmppDomain, Sid, Rid, StartAttrsXml, [], 0, IP).
+  AttrsXml = lists:map(fun(X) -> {Key, Val} = X, Bkey = list_to_binary(Key), Bval = list_to_binary(Val), exmpp_xml:attribute(Bkey, Bval) end, Attrs),
+  StartAttrs = lists:append(StartAttrsXml, AttrsXml),
+  ejabberd_http_bind:handle_session_start(Pid, XmppDomain, Sid, Rid, StartAttrs, [], 0, IP).
 
 start_auth(Sid, IP, Rid, Jid) ->
   ?DEBUG("start_auth Rid: ~p", [Rid]),
