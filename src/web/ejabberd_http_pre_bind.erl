@@ -84,13 +84,12 @@ start_http_bind(Sid, IP, Rid, XmppDomain, Attrs) ->
   ejabberd_http_bind:handle_session_start(Pid, XmppDomain, Sid, Rid, StartAttrs, [], 0, IP).
 
 start_auth(Sid, IP, Rid, Jid) ->
-  ?DEBUG("start_auth Rid: ~p", [Rid]),
-  Attrs = {ok , [
-      {"rid", integer_to_list(Rid)},
-      {"xmlns", ?NS_HTTP_BIND},
-      {"sid", Sid}
-    ]},
-  Payload = exmpp_client_sasl:selected_mechanism(auth_mechanism(Jid)),
+  Attrs = [
+    exmpp_xml:attribute(<<"rid">>, Rid),
+    exmpp_xml:attribute(<<"sid">>, Sid) %% Sid is already a binary
+  ],
+  Mechanism = auth_mechanism(Jid),
+  Payload = [exmpp_client_sasl:selected_mechanism(Mechanism)],
   RidA = handle_auth(Sid, Rid, Attrs, Payload, 0, false, IP, 0),
   RidA.
   
@@ -182,15 +181,15 @@ handle_auth(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_C
 handle_auth(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
   %% wait to make sure we had auth success.
   case handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
-    {ok, [{xmlstreamelement,
-          {xmlelement,"success",
-            [{"xmlns","urn:ietf:params:xml:ns:xmpp-sasl"}],
-            []}}]} ->
+    {ok, [#xmlstreamelement{element = #xmlel{name = success}}]} ->
+      ?DEBUG("Success authenticating", []),
       Rid;
     {ok, _Els} ->
+      ?DEBUG("Authentication failed, sleeping", []),
       timer:sleep(100),
       handle_auth(Sid, Rid + 1, Attrs, Payload, PayloadSize, StreamStart, IP, Count + 1);
     _ ->
+      ?DEBUG("Authentication failed, falling through", []),
       Rid
   end.
 
