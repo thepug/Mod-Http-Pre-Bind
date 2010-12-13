@@ -97,49 +97,6 @@ handle_auth(Sid, Rid,
 
 handle_bind(_, Rid, _, ?MAX_COUNT) ->
   {Rid, {200,
-      [{"Content-Type","text/xml; charset=utf-8"}],
-      []}};
-
-handle_bind(Sid, Rid, IP, Count) ->
-  BindAttrs = [
-    {"rid",integer_to_list(Rid)},
-    {"xmlns",?NS_HTTP_BIND},
-    {"sid",Sid}],
-  BindPayload = [{xmlelement,"iq",
-      [{"type","set"},
-        {"id","_bind_auth_2"},
-        {"xmlns","jabber:client"}],
-      [{xmlelement,"bind",
-          [{"xmlns",
-              "urn:ietf:params:xml:ns:xmpp-bind"}],[]}]}],
-  BindPayloadSize = 228,
-  {ok, Retval0} = handle_http_put(Sid,
-    Rid,
-    BindAttrs,
-    BindPayload,
-    BindPayloadSize,
-    false,
-    IP),
-  ?DEBUG("Retval ~p ~n",[Retval0]),
-  Els = [OEl || {xmlstreamelement, OEl} <- Retval0],
-  case lists:any(fun({xmlelement, "iq", _, _}) ->
-          true;
-        (_) ->
-          false
-      end, Els) of 
-    true ->
-      XmlElementString = xml:element_to_string({xmlelement,"body",
-          [{"xmlns",
-              ?NS_HTTP_BIND}] ++ 
-          [{"sid",Sid}] ++ 
-          [{"rid",integer_to_list(Rid+1)}],
-          Els}),
-      {Rid, {200,
-          [{"Content-Type","text/xml; charset=utf-8"}],
-          XmlElementString}};
-    false ->
-      handle_bind(Sid, Rid + 1, IP, Count + 1)
-  end.
 
 %% Entry point for data coming from client through ejabberd HTTP server
 process_request(Data, IP) ->
@@ -256,6 +213,50 @@ start_session(Sid, IP, Rid) ->
               "urn:ietf:params:xml:ns:xmpp-session"}],[]}]}],
   PayloadSize = iolist_size(Payload),
   handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, false, IP).
+
+      [{"Content-Type","text/xml; charset=utf-8"}],
+      []}};
+
+handle_bind(Sid, Rid, IP, Count) ->
+  BindAttrs = [
+    {"rid",integer_to_list(Rid)},
+    {"xmlns",?NS_HTTP_BIND},
+    {"sid",Sid}],
+  BindPayload = [{xmlelement,"iq",
+      [{"type","set"},
+        {"id","_bind_auth_2"},
+        {"xmlns","jabber:client"}],
+      [{xmlelement,"bind",
+          [{"xmlns",
+              "urn:ietf:params:xml:ns:xmpp-bind"}],[]}]}],
+  BindPayloadSize = 228,
+  {ok, Retval0} = handle_http_put(Sid,
+    Rid,
+    BindAttrs,
+    BindPayload,
+    BindPayloadSize,
+    false,
+    IP),
+  ?DEBUG("Retval ~p ~n",[Retval0]),
+  Els = [OEl || {xmlstreamelement, OEl} <- Retval0],
+  case lists:any(fun({xmlelement, "iq", _, _}) ->
+          true;
+        (_) ->
+          false
+      end, Els) of 
+    true ->
+      XmlElementString = xml:element_to_string({xmlelement,"body",
+          [{"xmlns",
+              ?NS_HTTP_BIND}] ++ 
+          [{"sid",Sid}] ++ 
+          [{"rid",integer_to_list(Rid+1)}],
+          Els}),
+      {Rid, {200,
+          [{"Content-Type","text/xml; charset=utf-8"}],
+          XmlElementString}};
+    false ->
+      handle_bind(Sid, Rid + 1, IP, Count + 1)
+  end.
 
 code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
