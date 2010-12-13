@@ -22,88 +22,12 @@
 
 -define(MAX_COUNT, 3).
 
-%% handle http put similar to bind, but withouth send_outpacket
-handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) ->
-  case ejabberd_http_bind:http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
-    {error, not_exists} ->
-      ?DEBUG("no session associated with sid: ~p", [Sid]),
-      {error, not_exists};
-    {{error, Reason}, _Sess} ->
-      ?DEBUG("Error on HTTP put. Reason: ~p", [Reason]),
-      %% ignore errors
-      {ok, []};
-    {{wait, Pause}, _Sess} ->
-      ?DEBUG("Trafic Shaper: Delaying request ~p", [Rid]),
-      timer:sleep(Pause),
-      handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize,
-        StreamStart, IP);
-    {buffered, _Sess} ->
-      ?DEBUG("buffered", []),
-      {ok, []};
-    {ok, Sess} ->
-      handle_response(Sess, Rid);
-    Out ->
-      ?ERROR_MSG("Handle Put was invalid : ~p ~n", [Out]),
-      {error, undefined}
-  end.
-
-handle_response(Sess, Rid) ->
-  ?DEBUG("Handling response.", []),
-  case catch ejabberd_http_bind:http_get(Sess, Rid) of
-    {ok, cancel} ->
-      {ok, cancel};
-    {ok, empty} ->
-      {ok, empty};
-    {ok, terminate} ->
-      {ok, terminate};
-    {ok, ROutPacket} ->
-      OutPacket = lists:reverse(ROutPacket),
-      ?DEBUG("OutPacket: ~p", [OutPacket]),
-      {ok, OutPacket};
-    {'EXIT', {shutdown, _}} ->
-      {error, terminate};
-    {'EXIT', _Reason} ->
-      {error, terminate}
-  end.
-
-handle_auth(_Sid, Rid, 
-  _Attrs, _Payload, 
-  _PayloadSize, 
-  _StreamStart, 
-  _IP, ?MAX_COUNT) ->
-  Rid;
-
-handle_auth(Sid, Rid, 
-  Attrs, Payload, 
-  PayloadSize, 
-  StreamStart, 
-  IP, Count) ->
-  %% wait to make sure we had auth success.
-  case handle_http_put(Sid, Rid, Attrs, 
-      Payload, PayloadSize, 
-      StreamStart, IP) of
-    {ok, [{xmlstreamelement,
-          {xmlelement,"success",
-            [{"xmlns","urn:ietf:params:xml:ns:xmpp-sasl"}],
-            []}}]} ->
-      Rid;
-    {ok, _Els} ->
-      timer:sleep(100),
-      handle_auth(Sid, Rid + 1, Attrs, Payload, 
-        PayloadSize, StreamStart, IP, Count + 1);
-    _ ->
-      Rid
-  end.
-
-handle_bind(_, Rid, _, ?MAX_COUNT) ->
-  {Rid, {200,
-
 %% Entry point for data coming from client through ejabberd HTTP server
 process_request(Data, IP) ->
   %% Parse incoming data.
   {ok, {Rid, Jid, XmppDomain, Attrs}} = parse_request(Data),
 
-  %% Start a session
+  %% Start the cycle
   Sid = ejabberd_http_bind:make_sid(),
   start_http_bind(Sid, IP, Rid, XmppDomain, Attrs),
 
@@ -148,19 +72,23 @@ start_http_bind(Sid, IP, Rid, XmppDomain, Attrs) ->
   ?DEBUG("start_http_bind, Rid: ~p", [Rid]),
   {ok, Pid} = ejabberd_http_bind:start(XmppDomain, Sid, "", IP),
   StartAttrs = [
-    {"rid", Rid},
-    {"to", XmppDomain},
-    {"xmlns", ?NS_HTTP_BIND},
-    {"xml:lang", "en"},
-    {"xmpp:version", "1.0"},
-    {"ver", "1.6"},
-    {"xmlns:xmpp", "urn:xmpp:bosh"},
-    {"window", "5"},
-    {"content", "text/xml"},
-    {"charset", "utf-8"}
+    #xmlattr{name = <<"rid">>, value = <<Rid>>},
+    #xmlattr{name = <<"to">>, value = <<XmppDomain>>},
+    #xmlattr{name = <<"xmlns">>, value = <<?NS_HTTP_BIND>>},
+    #xmlattr{name = <<"xml:lang">>, value = <<"en">>},
+    #xmlattr{name = <<"xmpp:version">>, value = <<"1.0">>},
+    #xmlattr{name = <<"ver">>, value = <<"1.6">>},
+    #xmlattr{name = <<"xmlns:xmpp">>, value = <<"urn:xmpp:bosh">>},
+    #xmlattr{name = <<"window">>, value = <<"5">>},
+    #xmlattr{name = <<"content">>, value = <<"text/xml">>},
+    #xmlattr{name = <<"charset">>, value = <<"utf-8">>}
   ],
-  StartAttrsL = lists:append(StartAttrs, Attrs),
-  ejabberd_http_bind:handle_session_start(Pid, XmppDomain, Sid, Rid, StartAttrsL, [], 0, IP).
+  AttrsXml = map(fun(X) -> 
+        {Key, Value} = X,
+        exmpp_xml:attribute(Key, Value)
+    end, Attrs),
+  StartAttrsXml = lists:append(StartAttrs, AttrsXml),
+  ejabberd_http_bind:handle_session_start(Pid, XmppDomain, Sid, Rid, StartAttrsXml, [], 0, IP).
 
 start_auth(Sid, IP, Rid, Jid) ->
   ?DEBUG("start_auth Rid: ~p", [Rid]),
@@ -169,10 +97,7 @@ start_auth(Sid, IP, Rid, Jid) ->
       {"xmlns", ?NS_HTTP_BIND},
       {"sid", Sid}
     ]},
-  Payload = #xmlel{name = auth, attrs = [
-        #xmlattr{name = <<"xmlns">>, value = <<"urn:ietf:params:xml:ns:xmpp-sasl">>},
-        #xmlattr{name = <<"mechanism">>, value = list_to_binary(auth_mechanism(Jid))}
-      ]},
+  Payload = exmpp_client_sasl:selected_mechanism(auth_mechanism(Jid)),
   RidA = handle_auth(Sid, Rid, Attrs, Payload, 0, false, IP, 0),
   RidA.
   
@@ -214,6 +139,70 @@ start_session(Sid, IP, Rid) ->
   PayloadSize = iolist_size(Payload),
   handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, false, IP).
 
+%% handle http put similar to bind, but withouth send_outpacket
+handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) ->
+  case ejabberd_http_bind:http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
+    {error, not_exists} ->
+      ?DEBUG("no session associated with sid: ~p", [Sid]),
+      {error, not_exists};
+    {{error, Reason}, _Sess} ->
+      ?DEBUG("Error on HTTP put. Reason: ~p", [Reason]),
+      %% ignore errors
+      {ok, []};
+    {{wait, Pause}, _Sess} ->
+      ?DEBUG("Trafic Shaper: Delaying request ~p", [Rid]),
+      timer:sleep(Pause),
+      handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize,
+        StreamStart, IP);
+    {buffered, _Sess} ->
+      ?DEBUG("buffered", []),
+      {ok, []};
+    {ok, Sess} ->
+      handle_response(Sess, Rid);
+    Out ->
+      ?ERROR_MSG("Handle Put was invalid : ~p ~n", [Out]),
+      {error, undefined}
+  end.
+
+handle_response(Sess, Rid) ->
+  ?DEBUG("Handling response.", []),
+  case catch ejabberd_http_bind:http_get(Sess, Rid) of
+    {ok, cancel} ->
+      {ok, cancel};
+    {ok, empty} ->
+      {ok, empty};
+    {ok, terminate} ->
+      {ok, terminate};
+    {ok, ROutPacket} ->
+      OutPacket = lists:reverse(ROutPacket),
+      ?DEBUG("OutPacket: ~p", [OutPacket]),
+      {ok, OutPacket};
+    {'EXIT', {shutdown, _}} ->
+      {error, terminate};
+    {'EXIT', _Reason} ->
+      {error, terminate}
+  end.
+
+handle_auth(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
+  Rid;
+
+handle_auth(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
+  %% wait to make sure we had auth success.
+  case handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
+    {ok, [{xmlstreamelement,
+          {xmlelement,"success",
+            [{"xmlns","urn:ietf:params:xml:ns:xmpp-sasl"}],
+            []}}]} ->
+      Rid;
+    {ok, _Els} ->
+      timer:sleep(100),
+      handle_auth(Sid, Rid + 1, Attrs, Payload, PayloadSize, StreamStart, IP, Count + 1);
+    _ ->
+      Rid
+  end.
+
+handle_bind(_, Rid, _, ?MAX_COUNT) ->
+  {Rid, {200,
       [{"Content-Type","text/xml; charset=utf-8"}],
       []}};
 
