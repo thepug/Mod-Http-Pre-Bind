@@ -40,7 +40,7 @@ process_request(Data, IP) ->
   [#xmlstreamelement{element = IQ}] = BindResponse,
 
   Body = exmpp_xml:element(?NS_HTTP_BIND, body, [
-      exmpp_xml:attribute(<<"rid">>, RidE),
+      exmpp_xml:attribute(<<"rid">>, RidE + 1),
       exmpp_xml:attribute(<<"sid">>, Sid)
     ], IQ),
 
