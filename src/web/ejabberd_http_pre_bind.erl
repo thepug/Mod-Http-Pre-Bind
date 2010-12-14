@@ -6,7 +6,7 @@
 
 -module(ejabberd_http_pre_bind).
 
--export(process_request/2]).
+-export([process_request/2]).
 
 -include_lib("exmpp/include/exmpp.hrl").
 
@@ -25,9 +25,8 @@ process_request(Data, IP) ->
   Sid = ejabberd_http_bind:make_sid(),
   RidA = start_http_bind(Sid, IP, Rid, From, XmppDomain, Attrs),
 
-  %% Authenticate, depending on if from is 'anonymous' or an actual Jid.
-  %% If the message is from "anonymous", SASL Anonymous is used, otherwise SASL Plain.
-  RidB = start_auth(Sid, IP, RidA + 1, Jid),
+  %% Anonymous Auth is always used.
+  RidB = start_auth(Sid, IP, RidA + 1, From),
 
   %% Restart the XMPP Stream.
   RidC = restart_stream(Sid, IP, RidB + 1, XmppDomain),
@@ -36,7 +35,7 @@ process_request(Data, IP) ->
   RidD = start_bind(Sid, IP, RidC + 1),
 
   %% Start the XMPP Session.
-  RidE = start_session(Sid, IP, RidD + 1),
+  _RidE = start_session(Sid, IP, RidD + 1),
   {ok, []}.
 
 %% Parse the initial client request to start the Pre-Bind process.
@@ -76,7 +75,7 @@ parse_request(Data) ->
 %%      xmpp:version='1.0'
 %%      xmlns='http://jabber.org/protocol/httpbind'
 %%      xmlns:xmpp='urn:xmpp:xbosh'/>
-start_http_bind(Sid, IP, Rid, From, XmppDomain, Attrs) ->
+start_http_bind(Sid, IP, Rid, _From, XmppDomain, Attrs) ->
   ?DEBUG("HTTP Bind Start", []),
   {ok, Pid} = ejabberd_http_bind:start(XmppDomain, Sid, "", IP),
   StartAttrsXml = [
@@ -87,12 +86,12 @@ start_http_bind(Sid, IP, Rid, From, XmppDomain, Attrs) ->
     exmpp_xml:attribute(<<"content">>, <<"text/xml; charset=utf-8">>),
     exmpp_xml:attribute(<<"ver">>, <<"1.6">>),
     exmpp_xml:attribute(?NS_BOSH, <<"version">>, <<"1.0">>),
-    exmpp_xml:attribute(<<"xmlns">, ?NS_HTTP_BIND_b)
+    exmpp_xml:attribute(<<"xmlns">>, ?NS_HTTP_BIND_b)
   ],
   AttrsXml = lists:map(fun(X) -> {Key, Val} = X, Bkey = list_to_binary(Key), Bval = list_to_binary(Val), exmpp_xml:attribute(Bkey, Bval) end, Attrs),
   Attrs = lists:append(StartAttrsXml, AttrsXml),
   %% handle_session_start does some internal consistentcy checkes, then passes to handle_http_put
-  Rid = handle_http_bind(Pid, XmppDomain, Sid, Rid, Attrs, [], 0, IP),
+  Rid = handle_http_bind(Pid, XmppDomain, Sid, Rid, Attrs, [], 0, IP, 0),
   Rid.
 
 %%<body wait='60'
@@ -120,7 +119,7 @@ start_http_bind(Sid, IP, Rid, From, XmppDomain, Attrs) ->
 %%</body>
 %% TODO: Have this poll with blank requests (limited by Count) until it receives the features.
 handle_http_bind(Pid, XmppDomain, Sid, Rid, Attrs, Payload, PayloadSize, IP, _Count) ->
-  case ejabberd_http_bind:handle_session_start(Pid, XmppDomain, Sid, Rid, Attrs, [], 0, IP) of
+  case ejabberd_http_bind:handle_session_start(Pid, XmppDomain, Sid, Rid, Attrs, Payload, PayloadSize, IP) of
     {ok, _Response} ->
       ?DEBUG("HTTP Bind Success", []),
       Rid;
@@ -134,14 +133,14 @@ handle_http_bind(Pid, XmppDomain, Sid, Rid, Attrs, Payload, PayloadSize, IP, _Co
 %%      sid='9d0343aed0c0398a615220b74973659ccfa54a4c-55238004'>
 %%  <auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='ANONYMOUS'/>
 %%</body>
-start_auth(Sid, IP, Rid, Jid) ->
+start_auth(Sid, IP, Rid, From) ->
   ?DEBUG("Authentication Start", []),
   Attrs = [
     exmpp_xml:attribute(<<"rid">>, Rid),
     exmpp_xml:attribute(<<"sid">>, Sid),
     exmpp_xml:attribute(<<"xmlns">>, ?NS_HTTP_BIND_b)
   ],
-  Mechanism = auth_mechanism(Jid),
+  Mechanism = auth_mechanism(From),
   Payload = [exmpp_client_sasl:selected_mechanism(Mechanism)],
   Rid = handle_auth(Sid, Rid, Attrs, Payload, 0, false, IP, 0),
   Rid.
@@ -158,6 +157,10 @@ auth_mechanism(Jid) ->
 %%<body xmlns='http://jabber.org/protocol/httpbind'>
 %%  <success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>
 %%</body>
+handle_auth(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
+  ?DEBUG("Authentication Max Poll", []),
+  Rid;
+
 handle_auth(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
   case handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
     {ok, [#xmlstreamelement{element = #xmlel{name = success}}]} ->
@@ -170,11 +173,7 @@ handle_auth(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
     _ ->
       ?DEBUG("Authentication Failed", []),
       Rid
-  end;
-
-handle_auth(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
-  ?DEBUG("Authentication Max Poll", []),
-  Rid.
+  end.
 
 %%<body rid='1573741824'
 %%      sid='SomeSID'
@@ -193,7 +192,7 @@ restart_stream(Sid, IP, Rid, XmppDomain) ->
     exmpp_xml:attribute(?NS_BOSH, <<"restart">>, <<"true">>),
     exmpp_xml:attribute(<<"xmlns">>, ?NS_HTTP_BIND_b)
   ],
-  Rid = handle_start_stream(Sid, Rid, Attrs, [], 0, true, IP, 0),
+  Rid = handle_restart_stream(Sid, Rid, Attrs, [], 0, true, IP, 0),
   Rid.
 
 %%<body xmlns='http://jabber.org/protocol/httpbind'
@@ -202,6 +201,10 @@ restart_stream(Sid, IP, Rid, XmppDomain) ->
 %%    <bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'/>
 %%  </stream:features>
 %%</body>
+handle_restart_stream(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
+  ?DEBUG("Restart Stream Max Poll", []),
+  Rid;
+
 handle_restart_stream(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
   case handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
     {ok, [#xmlstreamelement{element = #xmlel{name = features}}]} ->
@@ -214,11 +217,7 @@ handle_restart_stream(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Co
     _ ->
       ?DEBUG("Restart Stream Failed", []),
       Rid
-  end;
-
-handle_restart_stream(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
-  ?DEBUG("Restart Stream Max Poll", []),
-  Rid.
+  end.
 
 %%<body rid='1573741825'
 %%      sid='SomeSID'
@@ -252,6 +251,10 @@ start_bind(Sid, IP, Rid) ->
 %%  </iq>
 %%</body>
 %% TODO: Extract the provided JID from the Response
+handle_bind(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
+  ?DEBUG("Bind Max Poll", []),
+  Rid;
+
 handle_bind(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
   case handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
     {ok, [#xmlstreamelement{element = #xmlel{name = iq, attrs = [#xmlattr{name = <<"type">>, value = <<"result">>}]}}]} ->
@@ -264,11 +267,7 @@ handle_bind(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
     _ ->
       ?DEBUG("Bind Failed", []),
       Rid
-  end;
-
-handle_bind(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
-  ?DEBUG("Bind Max Poll", []),
-  Rid.
+  end.
 
 %%<body rid='186930090'
 %%      xmlns='http://jabber.org/protocol/httpbind'
@@ -295,8 +294,12 @@ start_session(Sid, IP, Rid) ->
 %%      type="result"
 %%      id="_session_auth_2"/>
 %%</body>
+handle_session(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
+  ?DEBUG("Session Max Poll", []),
+  Rid;
+
 handle_session(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
-  case handle_http_put(Sid, Rid, Attrs, Payload, 0, false, IP) of
+  case handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
     {ok, [#xmlstreamelement{element = #xmlel{name = iq, attrs = [#xmlattr{name = <<"type">>, value = <<"result">>}]}}]} ->
       ?DEBUG("Session Success", []),
       Rid;
@@ -308,10 +311,6 @@ handle_session(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
       ?DEBUG("Session Failed", []),
       Rid
   end.
-
-handle_session(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
-  ?DEBUG("Session Max Poll", []),
-  Rid.
 
 %% handle http put similar to bind, but withouth send_outpacket
 handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) ->
