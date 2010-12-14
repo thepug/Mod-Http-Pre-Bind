@@ -155,13 +155,15 @@ auth_mechanism(Jid) ->
       "PLAIN"
   end.
 
-%% <success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>
+%%<body xmlns='http://jabber.org/protocol/httpbind'>
+%%  <success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>
+%%</body>
 handle_auth(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
   case handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
     {ok, [#xmlstreamelement{element = #xmlel{name = success}}]} ->
       ?DEBUG("Authentication Success", []),
       Rid;
-    {ok, _Els} ->
+    {ok, _Response} ->
       ?DEBUG("Authentication Missed: Polling with blank requests", []),
       timer:sleep(100),
       handle_auth(Sid, Rid + 1, [], [], 0, StreamStart, IP, Count + 1);
@@ -170,7 +172,6 @@ handle_auth(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
       Rid
   end;
 
-%% Fail safe to prevent endless loops.
 handle_auth(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
   Rid.
 
@@ -182,21 +183,40 @@ handle_auth(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_C
 %%      xmlns='http://jabber.org/protocol/httpbind'
 %%      xmlns:xmpp='urn:xmpp:xbosh'/>
 restart_stream(Sid, IP, Rid, XmppDomain) ->
-  ?DEBUG("Start stream", []),
+  ?DEBUG("Restart Stream Start", []),
   Attrs = [
     exmpp_xml:attribute(<<"rid">>, Rid),
     exmpp_xml:attribute(<<"sid">>, Sid), %% Sid is already a binary
     exmpp_xml:attribute(<<"to">>, XmppDomain), %% XmppDomain is already a binary
     exmpp_xml:attribute(?NS_XML, <<"lang">>, <<"en">>),
-    exmpp_xml:attribute(?NS_BOSH, <<"restart">>, <<"true">>)
+    exmpp_xml:attribute(?NS_BOSH, <<"restart">>, <<"true">>),
+    exmpp_xml:attribute(<<"xmlns">>, ?NS_HTTP_BIND_b)
   ],
   Rid = handle_start_stream(Sid, Rid, Attrs, [], 0, true, IP, 0),
   Rid.
 
+%%<body xmlns='http://jabber.org/protocol/httpbind'
+%%      xmlns:stream='http://etherx.jabber.org/streams'>
+%%  <stream:features>
+%%    <bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'/>
+%%  </stream:features>
+%%</body>
 handle_restart_stream(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
   case handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
+    {ok, [#xmlstreamelement{element = #xmlel{name = features}}]} ->
+      ?DEBUG("Restart Stream Success", []),
+      Rid;
+    {ok, _Response} ->
+      ?DEBUG("Restart Stream Missed: Polling with blank requests", []),
+      timer:sleep(100),
+      handle_restart_stream(Sid, Rid + 1, [], [], 0, StreamStart, IP, Count + 1);
+    _ ->
+      ?DEBUG("Restart Stream Failed", []),
+      Rid
+  end;
 
-
+handle_restart_stream(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
+  Rid.
 
 start_bind(Sid, IP, Rid) ->
   ?DEBUG("Start bind", []),
