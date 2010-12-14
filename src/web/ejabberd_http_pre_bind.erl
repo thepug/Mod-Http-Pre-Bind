@@ -45,7 +45,7 @@ process_request(Data, IP) ->
     ], IQ),
 
   ?DEBUG("Body: ~p", [Body]),
-  {ok, Body}.
+  {200, [], Body}.
 
 %% Parse the initial client request to start the Pre-Bind process.
 parse_request(Data) ->
