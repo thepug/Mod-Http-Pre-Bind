@@ -116,12 +116,19 @@ start_http_bind(Sid, IP, Rid, _From, XmppDomain, Attrs) ->
 %%    </mechanisms>
 %%  </stream:features>
 %%</body>
-%% TODO: Have this poll with blank requests (limited by Count) until it receives the features.
-handle_http_bind(Pid, XmppDomain, Sid, Rid, Attrs, Payload, PayloadSize, IP, _Count) ->
+handle_http_bind(_Pid, _XmppDomain, _Sid, Rid, _Attrs, _Payload, _PayloadSize, _IP, ?MAX_COUNT) ->
+  ?DEBUG("HTTP Bind Max Poll", []),
+  Rid;
+
+handle_http_bind(Pid, XmppDomain, Sid, Rid, Attrs, Payload, PayloadSize, IP, Count) ->
   case ejabberd_http_bind:handle_session_start(Pid, XmppDomain, Sid, Rid, Attrs, Payload, PayloadSize, IP) of
-    {ok, _Response} ->
+    {ok, [#xmlstreamstart]} ->
       ?DEBUG("HTTP Bind Success", []),
       Rid;
+    {ok, _Response} ->
+      ?DEBUG("HTTP Bind Missed: Polling with blank requests", []),
+      timer:sleep(100),
+      handle_http_bind(Pid, XmppDomain, Sit, Rid, [], [], 0, IP, Count + 1);
     _ ->
       ?DEBUG("HTTP Bind Failed", []),
       Rid
