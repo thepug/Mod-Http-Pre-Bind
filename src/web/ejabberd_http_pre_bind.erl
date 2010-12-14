@@ -35,12 +35,12 @@ process_request(Data, IP) ->
   {RidD, BindResponse} = start_bind(Sid, IP, RidC + 1),
 
   %% Start the XMPP Session.
-  _RidE = start_session(Sid, IP, RidD + 1),
+  RidE = start_session(Sid, IP, RidD + 1),
 
   [#xmlstreamelement{element = IQ}] = BindResponse,
 
   Body = exmpp_xml:element(?NS_HTTP_BIND, body, [
-      exmpp_xml:attribute(<<"rid">>, Rid),
+      exmpp_xml:attribute(<<"rid">>, RidE),
       exmpp_xml:attribute(<<"sid">>, Sid)
     ], IQ),
 
