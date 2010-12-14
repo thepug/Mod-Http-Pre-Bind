@@ -36,10 +36,13 @@ process_request(Data, IP) ->
   RidA = start_auth(Sid, IP, Rid + 1, Jid),
 
   %% Start the XMPP Stream.
-  {RidB, Retval} = start_stream(Sid, IP, RidA + 1, XmppDomain),
+  RidB = start_stream(Sid, IP, RidA + 1, XmppDomain),
+
+  %% Bind to the Stream.
+  RidC = start_bind(Sid, IP, RidB + 1, XmppDomain),
 
   %% Start the XMPP Session.
-  start_session(Sid, IP, RidB + 1),
+  {RidD, Retval} = start_session(Sid, IP, RidC + 1),
 
   Retval.
 
@@ -68,6 +71,7 @@ parse_request(Data) ->
       ?MOD_HTTP_PRE_BIND_BAD_REQUEST
   end.
 
+%% <body rid='186930086' xmlns='http://jabber.org/protocol/httpbind' to='example.com' xml:lang='en' wait='60' hold='1' content='text/xml; charset=utf-8' ver='1.6' xmpp:version='1.0' xmlns:xmpp='urn:xmpp:xbosh'/>
 start_http_bind(Sid, IP, Rid, XmppDomain, Attrs) ->
   {ok, Pid} = ejabberd_http_bind:start(XmppDomain, Sid, "", IP),
   StartAttrsXml = [
@@ -75,7 +79,6 @@ start_http_bind(Sid, IP, Rid, XmppDomain, Attrs) ->
     exmpp_xml:attribute(<<"to">>, XmppDomain),
     exmpp_xml:attribute(?NS_XML, <<"lang">>, <<"en">>),
     exmpp_xml:attribute(<<"content">>, <<"text/xml; charset=utf-8">>),
-    exmpp_xml:attribute(<<"window">>, <<"5">>),
     exmpp_xml:attribute(<<"ver">>, <<"1.6">>),
     exmpp_xml:attribute(?NS_BOSH, <<"version">>, <<"1.0">>)
   ],
@@ -83,6 +86,7 @@ start_http_bind(Sid, IP, Rid, XmppDomain, Attrs) ->
   StartAttrs = lists:append(StartAttrsXml, AttrsXml),
   ejabberd_http_bind:handle_session_start(Pid, XmppDomain, Sid, Rid, StartAttrs, [], 0, IP).
 
+%% <body rid='186930087' xmlns='http://jabber.org/protocol/httpbind' sid='9d0343aed0c0398a615220b74973659ccfa54a4c-55238004'><auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='ANONYMOUS'/></body>
 start_auth(Sid, IP, Rid, Jid) ->
   Attrs = [
     exmpp_xml:attribute(<<"rid">>, Rid),
@@ -101,35 +105,90 @@ auth_mechanism(Jid) ->
       "PLAIN"
   end.
 
+handle_auth(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
+  Rid;
+
+handle_auth(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
+  case handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
+    {ok, [#xmlstreamelement{element = #xmlel{name = success}}]} ->
+      ?DEBUG("Success authenticating", []),
+      Rid;
+    {ok, _Els} ->
+      ?DEBUG("Authentication failed, sleeping", []),
+      timer:sleep(100),
+      handle_auth(Sid, Rid + 1, Attrs, Payload, PayloadSize, StreamStart, IP, Count + 1);
+    _ ->
+      ?DEBUG("Authentication failed, falling through", []),
+      Rid
+  end.
+
+%% <body rid='186930088' xmlns='http://jabber.org/protocol/httpbind' sid='9d0343aed0c0398a615220b74973659ccfa54a4c-55238004' to='example.com' xml:lang='en' xmpp:restart='true' xmlns:xmpp='urn:xmpp:xbosh'/>
 start_stream(Sid, IP, Rid, XmppDomain) ->
   Attrs = [
-    {"rid", integer_to_list(Rid)},
-    {"sid", Sid},
-    {"xmlns", ?NS_HTTP_BIND},
-    {"xml:lang", "en"},
-    {"xmlns:xmpp", "urn:xmpp:xbosh"},
-    {"to", XmppDomain},
-    {"xmpp:restart", "true"}
+    exmpp_xml:attribute(<<"rid">>, Rid),
+    exmpp_xml:attribute(<<"sid">>, Sid), %% Sid is already a binary
+    exmpp_xml:attribute(<<"to">>, XmppDomain), %% XmppDomain is already a binary
+    exmpp_xml:attribute(?NS_XML, <<"lang">>, <<"en">>),
+    exmpp_xml:attribute(?NS_BOSH, <<"restart">>, <<"true">>)
   ],
   handle_http_put(Sid, Rid, Attrs, [], 0, true, IP),
-  {RidB, Retval} = handle_bind(Sid, Rid + 1, IP, 0),
-  {RidB, Retval}.
+  Rid + 1.
+
+start_bind(Sid, IP, Rid, XmppDomain) ->
+  ?DEBUG("Start bind", []),
+  Attrs = [
+    exmpp_xml:attribute(<<"rid">>, Rid),
+    exmpp_xml:attribute(<<"sid">>, Sid), %% Already a binary
+    exmpp_xml:attribute(<<"xmlns">>, ?NS_HTTP_BIND_b)
+  ],
+  %% <body rid='186930089' xmlns='http://jabber.org/protocol/httpbind' sid='9d0343aed0c0398a615220b74973659ccfa54a4c-55238004'><iq type='set' id='_bind_auth_2' xmlns='jabber:client'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'/></iq></body>
+  Payload = [exmpp_client_binding:bind()],
+  RidC = handle_bind(Sid, Rid, Attrs, Payload, 0, false, IP),
+  RidC.
+
+handle_bind(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
+  Rid;
+
+handle_bind(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
+  case handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
+    {ok, [#xmlstreamelement{element = #xmlel{name = features}}]} ->
+      ?DEBUG("Success binding", []),
+      Rid;
+    {ok, _Els} ->
+      ?DEBUG("Bind failed, sleeping", []),
+      timer:sleep(100),
+      handle_bind(Sid, Rid + 1, Attrs, Payload, PayloadSize, StreamStart, IP, Count + 1);
+    _ ->
+      ?DEBUG("Bind failed, falling through", []),
+      Rid
+  end.
 
 start_session(Sid, IP, Rid) ->
   Attrs = [
-    {"rid", integer_to_list(Rid)},
-    {"xmlns", ?NS_HTTP_BIND},
-    {"sid", Sid}
+    exmpp_xml:attribute(<<"rid">>, Rid),
+    exmpp_xml:attribute(<<"sid">>, Sid), %% Sid is already a binary
+    exmpp_xml:attribute(<<"xmlns">>, ?NS_HTTP_BIND_b)
   ],
- Payload = [{xmlelement,"iq",
-      [{"type","set"},
-        {"id","_session_auth_2"},
-        {"xmlns","jabber:client"}],
-      [{xmlelement,"session",
-          [{"xmlns",
-              "urn:ietf:params:xml:ns:xmpp-session"}],[]}]}],
-  PayloadSize = iolist_size(Payload),
-  handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, false, IP).
+  Payload = [exmpp_client_session:establish()],
+  {RidD, Response} = handle_session(Sid, Rid, Attrs, Payload, 0, false, IP),
+  {RidD, Response).
+
+handle_session(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
+  Rid;
+
+handle_session(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP Count) ->
+  case handle_http_put(Sid, Rid, Attrs, Payload, 0, false, IP) of
+    {ok, [#xmlstreamelement{element = #xmlel{name = iq}}]} ->
+      ?DEBUG("Success streaming", []),
+      Rid;
+    {ok, _Els} ->
+      ?DEBUG("Session failed, sleeping", []),
+      timer:sleep(100),
+      handle_session(Sid, Rid + 1, Attrs, Payload, PayloadSize, StreamStart, IP, Count + 1);
+    _ ->
+      ?Debug("Session failed, falling through", []),
+      Rid
+  end.
 
 %% handle http put similar to bind, but withouth send_outpacket
 handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) ->
@@ -173,70 +232,6 @@ handle_response(Sess, Rid) ->
       {error, terminate};
     {'EXIT', _Reason} ->
       {error, terminate}
-  end.
-
-handle_auth(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
-  Rid;
-
-handle_auth(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
-  %% wait to make sure we had auth success.
-  case handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
-    {ok, [#xmlstreamelement{element = #xmlel{name = success}}]} ->
-      ?DEBUG("Success authenticating", []),
-      Rid;
-    {ok, _Els} ->
-      ?DEBUG("Authentication failed, sleeping", []),
-      timer:sleep(100),
-      handle_auth(Sid, Rid + 1, Attrs, Payload, PayloadSize, StreamStart, IP, Count + 1);
-    _ ->
-      ?DEBUG("Authentication failed, falling through", []),
-      Rid
-  end.
-
-handle_bind(_, Rid, _, ?MAX_COUNT) ->
-  {Rid, {200,
-      [{"Content-Type","text/xml; charset=utf-8"}],
-      []}};
-
-handle_bind(Sid, Rid, IP, Count) ->
-  BindAttrs = [
-    {"rid",integer_to_list(Rid)},
-    {"xmlns",?NS_HTTP_BIND},
-    {"sid",Sid}],
-  BindPayload = [{xmlelement,"iq",
-      [{"type","set"},
-        {"id","_bind_auth_2"},
-        {"xmlns","jabber:client"}],
-      [{xmlelement,"bind",
-          [{"xmlns",
-              "urn:ietf:params:xml:ns:xmpp-bind"}],[]}]}],
-  BindPayloadSize = 228,
-  {ok, Retval0} = handle_http_put(Sid,
-    Rid,
-    BindAttrs,
-    BindPayload,
-    BindPayloadSize,
-    false,
-    IP),
-  ?DEBUG("Retval ~p ~n",[Retval0]),
-  Els = [OEl || {xmlstreamelement, OEl} <- Retval0],
-  case lists:any(fun({xmlelement, "iq", _, _}) ->
-          true;
-        (_) ->
-          false
-      end, Els) of 
-    true ->
-      XmlElementString = xml:element_to_string({xmlelement,"body",
-          [{"xmlns",
-              ?NS_HTTP_BIND}] ++ 
-          [{"sid",Sid}] ++ 
-          [{"rid",integer_to_list(Rid+1)}],
-          Els}),
-      {Rid, {200,
-          [{"Content-Type","text/xml; charset=utf-8"}],
-          XmlElementString}};
-    false ->
-      handle_bind(Sid, Rid + 1, IP, Count + 1)
   end.
 
 code_change(_OldVsn, State, _Extra) ->
