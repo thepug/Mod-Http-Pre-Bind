@@ -79,7 +79,6 @@ start_http_bind(Sid, IP, Rid, _From, XmppDomain, Attrs) ->
   ?DEBUG("HTTP Bind Start", []),
   {ok, Pid} = ejabberd_http_bind:start(XmppDomain, Sid, "", IP),
   StartAttrsXml = [
-    %%exmpp_xml:attribute(<<"from">>, From),
     exmpp_xml:attribute(<<"rid">>, Rid),
     exmpp_xml:attribute(<<"to">>, XmppDomain),
     exmpp_xml:attribute(?NS_XML, <<"lang">>, <<"en">>),
@@ -89,9 +88,9 @@ start_http_bind(Sid, IP, Rid, _From, XmppDomain, Attrs) ->
     exmpp_xml:attribute(<<"xmlns">>, ?NS_HTTP_BIND_b)
   ],
   AttrsXml = lists:map(fun(X) -> {Key, Val} = X, Bkey = list_to_binary(Key), Bval = list_to_binary(Val), exmpp_xml:attribute(Bkey, Bval) end, Attrs),
-  Attrs = lists:append(StartAttrsXml, AttrsXml),
+  FullAttrs = lists:append(StartAttrsXml, AttrsXml),
   %% handle_session_start does some internal consistentcy checkes, then passes to handle_http_put
-  Rid = handle_http_bind(Pid, XmppDomain, Sid, Rid, Attrs, [], 0, IP, 0),
+  Rid = handle_http_bind(Pid, XmppDomain, Sid, Rid, FullAttrs, [], 0, IP, 0),
   Rid.
 
 %%<body wait='60'
