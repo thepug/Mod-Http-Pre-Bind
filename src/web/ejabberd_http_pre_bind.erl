@@ -32,11 +32,20 @@ process_request(Data, IP) ->
   RidC = restart_stream(Sid, IP, RidB + 1, XmppDomain),
 
   %% Bind to the Stream.
-  RidD = start_bind(Sid, IP, RidC + 1),
+  {RidD, BindResponse} = start_bind(Sid, IP, RidC + 1),
 
   %% Start the XMPP Session.
   _RidE = start_session(Sid, IP, RidD + 1),
-  {ok, []}.
+
+  [#xmlstreamelement{element = IQ}] = BindResponse,
+
+  Body = exmpp_xml:element(?NS_HTTP_BIND, body, [
+      exmpp_xml:attribute(<<"rid">>, Rid),
+      exmpp_xml:attribute(<<"sid">>, Sid)
+    ], IQ),
+
+  ?DEBUG("Body: ~p", [Body]),
+  {ok, Body}.
 
 %% Parse the initial client request to start the Pre-Bind process.
 parse_request(Data) ->
@@ -116,21 +125,13 @@ start_http_bind(Sid, IP, Rid, _From, XmppDomain, Attrs) ->
 %%    </mechanisms>
 %%  </stream:features>
 %%</body>
-handle_http_bind(_Pid, _XmppDomain, _Sid, Rid, _Attrs, _Payload, _PayloadSize, _IP, ?MAX_COUNT) ->
-  ?DEBUG("HTTP Bind Max Poll", []),
-  Rid;
-
-handle_http_bind(Pid, XmppDomain, Sid, Rid, Attrs, Payload, PayloadSize, IP, Count) ->
+handle_http_bind(Pid, XmppDomain, Sid, Rid, Attrs, Payload, PayloadSize, IP, _Count) ->
   case ejabberd_http_bind:handle_session_start(Pid, XmppDomain, Sid, Rid, Attrs, Payload, PayloadSize, IP) of
-    {ok, [#xmlstreamstart{}]} ->
+    {200, _Headers, _Body} ->
       ?DEBUG("HTTP Bind Success", []),
       Rid;
-    {ok, _Response} ->
-      ?DEBUG("HTTP Bind Missed: Polling with blank requests", []),
-      timer:sleep(100),
-      handle_http_bind(Pid, XmppDomain, Sid, Rid, [], [], 0, IP, Count + 1);
-    _ ->
-      ?DEBUG("HTTP Bind Failed", []),
+    Response ->
+      ?DEBUG("HTTP Bind Failed: ~p", [Response]),
       Rid
   end.
 
@@ -148,8 +149,8 @@ start_auth(Sid, IP, Rid, From) ->
   ],
   Mechanism = auth_mechanism(From),
   Payload = [exmpp_client_sasl:selected_mechanism(Mechanism)],
-  Rid = handle_auth(Sid, Rid, Attrs, Payload, 0, false, IP, 0),
-  Rid.
+  RidL = handle_auth(Sid, Rid, Attrs, Payload, 0, false, IP, 0),
+  RidL.
 
 %% Helper to decide which SASL Mechanism to use.
 auth_mechanism(Jid) ->
@@ -172,8 +173,8 @@ handle_auth(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
     {ok, [#xmlstreamelement{element = #xmlel{name = success}}]} ->
       ?DEBUG("Authentication Success", []),
       Rid;
-    {ok, _Response} ->
-      ?DEBUG("Authentication Missed: Polling with blank requests", []),
+    {ok, Response} ->
+      ?DEBUG("Authentication Missed: Polling with blank requests: ~p", [Response]),
       timer:sleep(100),
       handle_auth(Sid, Rid + 1, [], [], 0, StreamStart, IP, Count + 1);
     _ ->
@@ -198,8 +199,8 @@ restart_stream(Sid, IP, Rid, XmppDomain) ->
     exmpp_xml:attribute(?NS_BOSH, <<"restart">>, <<"true">>),
     exmpp_xml:attribute(<<"xmlns">>, ?NS_HTTP_BIND_b)
   ],
-  Rid = handle_restart_stream(Sid, Rid, Attrs, [], 0, true, IP, 0),
-  Rid.
+  RidL = handle_restart_stream(Sid, Rid, Attrs, [], 0, true, IP, 0),
+  RidL.
 
 %%<body xmlns='http://jabber.org/protocol/httpbind'
 %%      xmlns:stream='http://etherx.jabber.org/streams'>
@@ -207,6 +208,7 @@ restart_stream(Sid, IP, Rid, XmppDomain) ->
 %%    <bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'/>
 %%  </stream:features>
 %%</body>
+%% This will typically miss on the first request, because it is looking for the features.
 handle_restart_stream(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
   ?DEBUG("Restart Stream Max Poll", []),
   Rid;
@@ -216,10 +218,10 @@ handle_restart_stream(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Co
     {ok, [#xmlstreamelement{element = #xmlel{name = features}}]} ->
       ?DEBUG("Restart Stream Success", []),
       Rid;
-    {ok, _Response} ->
-      ?DEBUG("Restart Stream Missed: Polling with blank requests", []),
+    {ok, Response} ->
+      ?DEBUG("Restart Stream Missed: Polling with blank requests: ~p", [Response]),
       timer:sleep(100),
-      handle_restart_stream(Sid, Rid + 1, [], [], 0, StreamStart, IP, Count + 1);
+      handle_restart_stream(Sid, Rid + 1, [], [], 0, false, IP, Count + 1);
     _ ->
       ?DEBUG("Restart Stream Failed", []),
       Rid
@@ -244,8 +246,8 @@ start_bind(Sid, IP, Rid) ->
     exmpp_xml:attribute(<<"xmlns">>, ?NS_HTTP_BIND_b)
   ],
   Payload = [exmpp_client_binding:bind()],
-  Rid = handle_bind(Sid, Rid, Attrs, Payload, 0, false, IP, 0),
-  Rid.
+  RidL = handle_bind(Sid, Rid, Attrs, Payload, 0, false, IP, 0),
+  RidL.
 
 %%<body xmlns='http://jabber.org/protocol/httpbind'>
 %%  <iq id='bind_1'
@@ -259,20 +261,22 @@ start_bind(Sid, IP, Rid) ->
 %% TODO: Extract the provided JID from the Response
 handle_bind(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
   ?DEBUG("Bind Max Poll", []),
-  Rid;
+  {Rid, []};
 
 handle_bind(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
-  case handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
-    {ok, [#xmlstreamelement{element = #xmlel{name = iq, attrs = [#xmlattr{name = <<"type">>, value = <<"result">>}]}}]} ->
+  R = handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP),
+  case R of
+    {ok, [#xmlstreamelement{element = #xmlel{name = iq}}]} ->
       ?DEBUG("Bind Success", []),
-      Rid;
-    {ok, _Response} ->
-      ?DEBUG("Bind Missed: Polling with blank requests", []),
+      {_Status, Body} = R,
+      {Rid, Body};
+    {ok, Response} ->
+      ?DEBUG("Bind Missed: Polling with blank requests: ~p", [Response]),
       timer:sleep(100),
       handle_bind(Sid, Rid + 1, [], [], 0, StreamStart, IP, Count + 1);
     _ ->
       ?DEBUG("Bind Failed", []),
-      Rid
+      {Rid, []}
   end.
 
 %%<body rid='186930090'
@@ -292,8 +296,8 @@ start_session(Sid, IP, Rid) ->
     exmpp_xml:attribute(<<"xmlns">>, ?NS_HTTP_BIND_b)
   ],
   Payload = [exmpp_client_session:establish()],
-  Rid = handle_session(Sid, Rid, Attrs, Payload, 0, false, IP, 0),
-  Rid.
+  RidL = handle_session(Sid, Rid, Attrs, Payload, 0, false, IP, 0),
+  RidL.
 
 %%<body xmlns='http://jabber.org/protocol/httpbind'>
 %%  <iq xmlns="jabber:client" 
@@ -306,11 +310,11 @@ handle_session(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MA
 
 handle_session(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
   case handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
-    {ok, [#xmlstreamelement{element = #xmlel{name = iq, attrs = [#xmlattr{name = <<"type">>, value = <<"result">>}]}}]} ->
+    {ok, [#xmlstreamelement{element = #xmlel{name = iq}}]} ->
       ?DEBUG("Session Success", []),
       Rid;
-    {ok, _Response} ->
-      ?DEBUG("Session Missed: Polling with blank requests", []),
+    {ok, Response} ->
+      ?DEBUG("Session Missed: Polling with blank requests: ~p", [Response]),
       timer:sleep(100),
       handle_session(Sid, Rid + 1, [], [], 0, StreamStart, IP, Count + 1);
     _ ->
