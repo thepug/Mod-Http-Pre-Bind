@@ -36,8 +36,8 @@ process_request(Data, IP) ->
   RidD = start_bind(Sid, IP, RidC + 1),
 
   %% Start the XMPP Session.
-  {RidE, Response} = start_session(Sid, IP, RidD + 1),
-  Response.
+  RidE = start_session(Sid, IP, RidD + 1),
+  {ok, []}.
 
 %% Parse the initial client request to start the Pre-Bind process.
 parse_request(Data) ->
@@ -173,6 +173,7 @@ handle_auth(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
   end;
 
 handle_auth(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
+  ?DEBUG("Authentication Max Poll", []),
   Rid.
 
 %%<body rid='1573741824'
@@ -186,8 +187,8 @@ restart_stream(Sid, IP, Rid, XmppDomain) ->
   ?DEBUG("Restart Stream Start", []),
   Attrs = [
     exmpp_xml:attribute(<<"rid">>, Rid),
-    exmpp_xml:attribute(<<"sid">>, Sid), %% Sid is already a binary
-    exmpp_xml:attribute(<<"to">>, XmppDomain), %% XmppDomain is already a binary
+    exmpp_xml:attribute(<<"sid">>, Sid),
+    exmpp_xml:attribute(<<"to">>, XmppDomain),
     exmpp_xml:attribute(?NS_XML, <<"lang">>, <<"en">>),
     exmpp_xml:attribute(?NS_BOSH, <<"restart">>, <<"true">>),
     exmpp_xml:attribute(<<"xmlns">>, ?NS_HTTP_BIND_b)
@@ -216,64 +217,101 @@ handle_restart_stream(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Co
   end;
 
 handle_restart_stream(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
+  ?DEBUG("Restart Stream Max Poll", []),
   Rid.
 
+%%<body rid='1573741825'
+%%      sid='SomeSID'
+%%      xmlns='http://jabber.org/protocol/httpbind'>
+%%  <iq id='bind_1'
+%%      type='set'
+%%      xmlns='jabber:client'>
+%%    <bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'>
+%%      <resource>httpclient</resource>
+%%    </bind>
+%%  </iq>
+%%</body>
 start_bind(Sid, IP, Rid) ->
-  ?DEBUG("Start bind", []),
+  ?DEBUG("Bind Start", []),
   Attrs = [
     exmpp_xml:attribute(<<"rid">>, Rid),
-    exmpp_xml:attribute(<<"sid">>, Sid), %% Already a binary
+    exmpp_xml:attribute(<<"sid">>, Sid),
     exmpp_xml:attribute(<<"xmlns">>, ?NS_HTTP_BIND_b)
   ],
-  %% <body rid='186930089' xmlns='http://jabber.org/protocol/httpbind' sid='9d0343aed0c0398a615220b74973659ccfa54a4c-55238004'><iq type='set' id='_bind_auth_2' xmlns='jabber:client'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'/></iq></body>
   Payload = [exmpp_client_binding:bind()],
-  RidC = handle_bind(Sid, Rid, Attrs, Payload, 0, false, IP, 0),
-  RidC.
+  Rid = handle_bind(Sid, Rid, Attrs, Payload, 0, false, IP, 0),
+  Rid.
 
-handle_bind(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
-  Rid;
-
+%%<body xmlns='http://jabber.org/protocol/httpbind'>
+%%  <iq id='bind_1'
+%%      type='result'
+%%      xmlns='jabber:client'>
+%%    <bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'>
+%%      <jid>user@example.com/httpclient</jid>
+%%    </bind>
+%%  </iq>
+%%</body>
+%% TODO: Extract the provided JID from the Response
 handle_bind(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
   case handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
-    {ok, [#xmlstreamelement{element = #xmlel{name = iq}}]} ->
-      ?DEBUG("Success binding", []),
+    {ok, [#xmlstreamelement{element = #xmlel{name = iq, attrs = [#xmlattr{name = <<"type">>, value = <<"result">>}]}}]} ->
+      ?DEBUG("Bind Success", []),
       Rid;
-    {ok, _Els} ->
-      ?DEBUG("Bind failed, sleeping", []),
+    {ok, _Response} ->
+      ?DEBUG("Bind Missed: Polling with blank requests", []),
       timer:sleep(100),
-      handle_bind(Sid, Rid + 1, Attrs, Payload, PayloadSize, StreamStart, IP, Count + 1);
+      handle_bind(Sid, Rid + 1, [], [], 0, StreamStart, IP, Count + 1);
     _ ->
-      ?DEBUG("Bind failed, falling through", []),
+      ?DEBUG("Bind Failed", []),
       Rid
-  end.
+  end;
 
+handle_bind(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
+  ?DEBUG("Bind Max Poll", []),
+  Rid.
+
+%%<body rid='186930090'
+%%      xmlns='http://jabber.org/protocol/httpbind'
+%%      sid='9d0343aed0c0398a615220b74973659ccfa54a4c-55238004'>
+%%  <iq type='set'
+%%      id='_session_auth_2'
+%%      xmlns='jabber:client'>
+%%    <session xmlns='urn:ietf:params:xml:ns:xmpp-session'/>
+%%  </iq>
+%%</body>
 start_session(Sid, IP, Rid) ->
-  ?DEBUG("Start session", []),
+  ?DEBUG("Start Session", []),
   Attrs = [
     exmpp_xml:attribute(<<"rid">>, Rid),
-    exmpp_xml:attribute(<<"sid">>, Sid), %% Sid is already a binary
+    exmpp_xml:attribute(<<"sid">>, Sid),
     exmpp_xml:attribute(<<"xmlns">>, ?NS_HTTP_BIND_b)
   ],
   Payload = [exmpp_client_session:establish()],
-  {RidD, Response} = handle_session(Sid, Rid, Attrs, Payload, 0, false, IP, 0),
-  {RidD, Response}.
+  Rid = handle_session(Sid, Rid, Attrs, Payload, 0, false, IP, 0),
+  Rid.
 
-handle_session(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
-  Rid;
-
+%%<body xmlns='http://jabber.org/protocol/httpbind'>
+%%  <iq xmlns="jabber:client" 
+%%      type="result"
+%%      id="_session_auth_2"/>
+%%</body>
 handle_session(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
   case handle_http_put(Sid, Rid, Attrs, Payload, 0, false, IP) of
-    {ok, [#xmlstreamelement{element = #xmlel{name = iq}}]} ->
-      ?DEBUG("Success streaming", []),
+    {ok, [#xmlstreamelement{element = #xmlel{name = iq, attrs = [#xmlattr{name = <<"type">>, value = <<"result">>}]}}]} ->
+      ?DEBUG("Session Success", []),
       Rid;
-    {ok, _Els} ->
-      ?DEBUG("Session failed, sleeping", []),
+    {ok, _Response} ->
+      ?DEBUG("Session Missed: Polling with blank requests", []),
       timer:sleep(100),
-      handle_session(Sid, Rid + 1, Attrs, Payload, PayloadSize, StreamStart, IP, Count + 1);
+      handle_session(Sid, Rid + 1, [], [], 0, StreamStart, IP, Count + 1);
     _ ->
-      ?DEBUG("Session failed, falling through", []),
+      ?DEBUG("Session Failed", []),
       Rid
   end.
+
+handle_session(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
+  ?DEBUG("Session Max Poll", []),
+  Rid.
 
 %% handle http put similar to bind, but withouth send_outpacket
 handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) ->
@@ -288,8 +326,7 @@ handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) ->
     {{wait, Pause}, _Sess} ->
       ?DEBUG("Trafic Shaper: Delaying request ~p", [Rid]),
       timer:sleep(Pause),
-      handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize,
-        StreamStart, IP);
+      handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP);
     {buffered, _Sess} ->
       ?DEBUG("buffered", []),
       {ok, []};
