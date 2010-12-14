@@ -25,7 +25,7 @@ process_request(Data, IP) ->
   Sid = ejabberd_http_bind:make_sid(),
   RidA = start_http_bind(Sid, IP, Rid, From, XmppDomain, Attrs),
 
-  %% Anonymous Auth is always used.
+  %% If From is empty or set to Anonymous, SASL Anonymous is used. 
   RidB = start_auth(Sid, IP, RidA + 1, From),
 
   %% Restart the XMPP Stream.
@@ -84,12 +84,13 @@ parse_request(Data) ->
 %%      xmpp:version='1.0'
 %%      xmlns='http://jabber.org/protocol/httpbind'
 %%      xmlns:xmpp='urn:xmpp:xbosh'/>
-start_http_bind(Sid, IP, Rid, _From, XmppDomain, Attrs) ->
+start_http_bind(Sid, IP, Rid, From, XmppDomain, Attrs) ->
   ?DEBUG("HTTP Bind Start", []),
   {ok, Pid} = ejabberd_http_bind:start(XmppDomain, Sid, "", IP),
   StartAttrsXml = [
     exmpp_xml:attribute(<<"rid">>, Rid),
     exmpp_xml:attribute(<<"to">>, XmppDomain),
+    exmpp_xml:attribute(<<"from">>, From),
     exmpp_xml:attribute(?NS_XML, <<"lang">>, <<"en">>),
     exmpp_xml:attribute(<<"content">>, <<"text/xml; charset=utf-8">>),
     exmpp_xml:attribute(<<"ver">>, <<"1.6">>),

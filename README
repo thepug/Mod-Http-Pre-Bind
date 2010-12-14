@@ -6,8 +6,7 @@ authentication and bosh session setup on one call. mod_http_pre_bind
 does this and returns a jid, sid, and rid of a valid BOSH session.
 
 It requires mod_http_bind.  Modifications are needed to
-src/web/ejabberd_http_bind.erl. The start, http_get, http_put,
-handle_session_start, and prepare_response functions need to be made
+src/web/ejabberd_http_bind.erl. The make_sid() function needs to be made
 public in the module code.  This prebind module simply calls those
 functions to initiate and handle a session.
 
@@ -38,9 +37,7 @@ Install both in ejabberd.cfg.
 Example post and response:
 
 POST
-<body to='example.com' rid='1234567' wait='60' hold='1' />
-
-
+<body from='anonymous' to='example.com' rid='1234567' wait='60' hold='1' />
 
 Response:
  <body xmlns='http://jabber.org/protocol/httpbind'   
@@ -54,17 +51,3 @@ Response:
      </bind>  
    </iq>  
 </body>
-
-Diff for src/web/ejabberd_http_bind.erl 
---- a/src/web/ejabberd_http_bind.erl
-+++ b/src/web/ejabberd_http_bind.erl
-@@ -32,13 +32,17 @@
-         change_shaper/2,
-         monitor/1,
-         close/1,
-+        start/4,
-+        handle_session_start/8,
-+        handle_http_put/7,
-+        http_put/7,
-+        prepare_response/4,
-
