@@ -39,11 +39,10 @@ process_request(Data, IP) ->
   RidB = start_stream(Sid, IP, RidA + 1, XmppDomain),
 
   %% Bind to the Stream.
-  RidC = start_bind(Sid, IP, RidB + 1, XmppDomain),
+  RidC = start_bind(Sid, IP, RidB + 1),
 
   %% Start the XMPP Session.
   {RidD, Retval} = start_session(Sid, IP, RidC + 1),
-
   Retval.
 
 %% Parse the initial client request to start the pre bind session.
@@ -73,6 +72,7 @@ parse_request(Data) ->
 
 %% <body rid='186930086' xmlns='http://jabber.org/protocol/httpbind' to='example.com' xml:lang='en' wait='60' hold='1' content='text/xml; charset=utf-8' ver='1.6' xmpp:version='1.0' xmlns:xmpp='urn:xmpp:xbosh'/>
 start_http_bind(Sid, IP, Rid, XmppDomain, Attrs) ->
+  ?DEBUG("Start HTTP Bind", []),
   {ok, Pid} = ejabberd_http_bind:start(XmppDomain, Sid, "", IP),
   StartAttrsXml = [
     exmpp_xml:attribute(<<"rid">>, Rid),
@@ -88,6 +88,7 @@ start_http_bind(Sid, IP, Rid, XmppDomain, Attrs) ->
 
 %% <body rid='186930087' xmlns='http://jabber.org/protocol/httpbind' sid='9d0343aed0c0398a615220b74973659ccfa54a4c-55238004'><auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='ANONYMOUS'/></body>
 start_auth(Sid, IP, Rid, Jid) ->
+  ?DEBUG("Start Auth", []),
   Attrs = [
     exmpp_xml:attribute(<<"rid">>, Rid),
     exmpp_xml:attribute(<<"sid">>, Sid) %% Sid is already a binary
@@ -124,6 +125,7 @@ handle_auth(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
 
 %% <body rid='186930088' xmlns='http://jabber.org/protocol/httpbind' sid='9d0343aed0c0398a615220b74973659ccfa54a4c-55238004' to='example.com' xml:lang='en' xmpp:restart='true' xmlns:xmpp='urn:xmpp:xbosh'/>
 start_stream(Sid, IP, Rid, XmppDomain) ->
+  ?DEBUG("Start stream", []),
   Attrs = [
     exmpp_xml:attribute(<<"rid">>, Rid),
     exmpp_xml:attribute(<<"sid">>, Sid), %% Sid is already a binary
@@ -134,7 +136,7 @@ start_stream(Sid, IP, Rid, XmppDomain) ->
   handle_http_put(Sid, Rid, Attrs, [], 0, true, IP),
   Rid + 1.
 
-start_bind(Sid, IP, Rid, XmppDomain) ->
+start_bind(Sid, IP, Rid) ->
   ?DEBUG("Start bind", []),
   Attrs = [
     exmpp_xml:attribute(<<"rid">>, Rid),
@@ -143,7 +145,7 @@ start_bind(Sid, IP, Rid, XmppDomain) ->
   ],
   %% <body rid='186930089' xmlns='http://jabber.org/protocol/httpbind' sid='9d0343aed0c0398a615220b74973659ccfa54a4c-55238004'><iq type='set' id='_bind_auth_2' xmlns='jabber:client'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'/></iq></body>
   Payload = [exmpp_client_binding:bind()],
-  RidC = handle_bind(Sid, Rid, Attrs, Payload, 0, false, IP),
+  RidC = handle_bind(Sid, Rid, Attrs, Payload, 0, false, IP, 0),
   RidC.
 
 handle_bind(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
@@ -151,7 +153,7 @@ handle_bind(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_C
 
 handle_bind(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
   case handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
-    {ok, [#xmlstreamelement{element = #xmlel{name = features}}]} ->
+    {ok, [#xmlstreamelement{element = #xmlel{name = iq}}]} ->
       ?DEBUG("Success binding", []),
       Rid;
     {ok, _Els} ->
@@ -164,19 +166,20 @@ handle_bind(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
   end.
 
 start_session(Sid, IP, Rid) ->
+  ?DEBUG("Start session", []),
   Attrs = [
     exmpp_xml:attribute(<<"rid">>, Rid),
     exmpp_xml:attribute(<<"sid">>, Sid), %% Sid is already a binary
     exmpp_xml:attribute(<<"xmlns">>, ?NS_HTTP_BIND_b)
   ],
   Payload = [exmpp_client_session:establish()],
-  {RidD, Response} = handle_session(Sid, Rid, Attrs, Payload, 0, false, IP),
-  {RidD, Response).
+  {RidD, Response} = handle_session(Sid, Rid, Attrs, Payload, 0, false, IP, 0),
+  {RidD, Response}.
 
 handle_session(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_COUNT) ->
   Rid;
 
-handle_session(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP Count) ->
+handle_session(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
   case handle_http_put(Sid, Rid, Attrs, Payload, 0, false, IP) of
     {ok, [#xmlstreamelement{element = #xmlel{name = iq}}]} ->
       ?DEBUG("Success streaming", []),
@@ -186,7 +189,7 @@ handle_session(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP Count) ->
       timer:sleep(100),
       handle_session(Sid, Rid + 1, Attrs, Payload, PayloadSize, StreamStart, IP, Count + 1);
     _ ->
-      ?Debug("Session failed, falling through", []),
+      ?DEBUG("Session failed, falling through", []),
       Rid
   end.
 
