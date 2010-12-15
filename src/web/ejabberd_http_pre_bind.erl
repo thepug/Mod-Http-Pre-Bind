@@ -154,13 +154,10 @@ start_auth(Sid, IP, Rid, From) ->
   RidL.
 
 %% Helper to decide which SASL Mechanism to use.
-auth_mechanism(Jid) ->
-  case Jid of
-    "anonymous" ->
-      "ANONYMOUS";
-    _ ->
-      "PLAIN"
-  end.
+auth_mechanism(From) when ?IS_JID(From) ->
+  "PLAIN";
+auth_mechanism(_) ->
+  "ANONYMOUS".
 
 %%<body xmlns='http://jabber.org/protocol/httpbind'>
 %%  <success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>
