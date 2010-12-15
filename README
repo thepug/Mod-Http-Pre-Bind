@@ -37,7 +37,7 @@ Install both in ejabberd.cfg.
 Example post and response:
 
 POST
-<body from='anonymous' to='example.com' rid='1234567' wait='60' hold='1' />
+<body to='example.com' rid='1234567' wait='60' hold='1' />
 
 Response:
  <body xmlns='http://jabber.org/protocol/httpbind'   
