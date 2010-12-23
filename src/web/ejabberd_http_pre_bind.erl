@@ -19,14 +19,14 @@
 %% Entry point for data coming from client through ejabberd HTTP server
 process_request(Data, IP) ->
   %% Parse incoming data.
-  {ok, {Rid, From, XmppDomain, Attrs}} = parse_request(Data),
+  {ok, {Rid, From, Password, XmppDomain, Attrs}} = parse_request(Data),
 
   %% Start the cycle
   Sid = ejabberd_http_bind:make_sid(),
   RidA = start_http_bind(Sid, IP, Rid, From, XmppDomain, Attrs),
 
   %% If From is empty or set to Anonymous, SASL Anonymous is used. 
-  RidB = start_auth(Sid, IP, RidA + 1, From),
+  RidB = start_auth(Sid, IP, RidA + 1, From, Password),
 
   %% Restart the XMPP Stream.
   RidC = restart_stream(Sid, IP, RidB + 1, XmppDomain),
@@ -57,12 +57,13 @@ parse_request(Data) ->
           ?MOD_HTTP_PRE_BIND_BAD_REQUEST;
         Rid ->
           From = exmpp_xml:get_attribute_from_list_as_list(Attrs, <<"from">>, error),
+          Password = exmpp_xml:get_attribute_from_list_as_list(Attrs, <<"password">>, error),
           XmppDomain = exmpp_xml:get_attribute_from_list_as_list(Attrs, <<"to">>, error),
           RetAttrs = [
             {"wait", exmpp_xml:get_attribute_from_list_as_list(Attrs, <<"wait">>, error)},
             {"hold", exmpp_xml:get_attribute_from_list_as_list(Attrs, <<"hold">>, error)}
           ],
-          {ok, {Rid, From, XmppDomain, RetAttrs}}
+          {ok, {Rid, From, Password, XmppDomain, RetAttrs}}
       end;
     [#xmlel{name = Name, attrs = _Attrs, children = _Children}] ->
       ?ERROR_MSG("Not a body ~p",[Name]),
@@ -141,23 +142,35 @@ handle_http_bind(Pid, XmppDomain, Sid, Rid, Attrs, Payload, PayloadSize, IP, _Co
 %%      sid='9d0343aed0c0398a615220b74973659ccfa54a4c-55238004'>
 %%  <auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='ANONYMOUS'/>
 %%</body>
-start_auth(Sid, IP, Rid, From) ->
+%% OR with SASL PLAIN
+%%<body rid='186930087'
+%%      xmlns='http://jabber.org/protocol/httpbind'
+%%      sid='9d0343aed0c0398a615220b74973659ccfa54a4c-55238004'>
+%%  <auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='PLAIN'>Base64 encoded username/password</auth>
+%%</body>
+
+start_auth(Sid, IP, Rid, From, Password) ->
   ?DEBUG("Authentication Start", []),
   Attrs = [
     exmpp_xml:attribute(<<"rid">>, Rid),
     exmpp_xml:attribute(<<"sid">>, Sid),
     exmpp_xml:attribute(<<"xmlns">>, ?NS_HTTP_BIND_b)
   ],
-  Mechanism = auth_mechanism(From),
-  Payload = [exmpp_client_sasl:selected_mechanism(Mechanism)],
+  Payload = auth_payload(From, Password),
   RidL = handle_auth(Sid, Rid, Attrs, Payload, 0, false, IP, 0),
   RidL.
 
-%% Helper to decide which SASL Mechanism to use.
-auth_mechanism(From) when ?IS_JID(From) ->
-  "PLAIN";
-auth_mechanism(_) ->
-  "ANONYMOUS".
+%% Decide and generate the appropriate SASL response.
+auth_payload(From, Password) ->
+  Mechanism = case catch exmpp_jid:parse(From) of
+    {'EXIT', _Reason} ->
+      exmpp_client_sasl:selected_mechanism("ANONYMOUS");
+    Jid ->
+      InitialResponse = iolist_to_binary([0, exmpp_jid:node_as_list(Jid), 0, Password]),
+      exmpp_client_sasl:selected_mechanism("PLAIN", InitialResponse)
+  end,
+  [Mechanism].
+
 
 %%<body xmlns='http://jabber.org/protocol/httpbind'>
 %%  <success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>
