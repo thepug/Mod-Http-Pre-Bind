@@ -34,10 +34,13 @@ Install both in ejabberd.cfg.
   {mod_http_pre_bind,      []},
 
 
-Example post and response:
+Example posts and response:
 
-POST
+SASL Anonymous: POST
 <body to='example.com' rid='1234567' wait='60' hold='1' />
+
+SASL PLAIN:
+<body from='foo@example.com' password='foobarbaz' to='example.com' rid='1234567' wait='60' hold='1' />
 
 Response:
  <body xmlns='http://jabber.org/protocol/httpbind'   
