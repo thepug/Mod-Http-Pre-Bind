@@ -15,12 +15,9 @@
 -include("ejabberd.hrl").
 -include("jlib.hrl").
 -include("ejabberd_http.hrl").
-
+-include("http_bind.hrl").
 
 -define(NS_HTTP_BIND, "http://jabber.org/protocol/httpbind").
--define(HEADER, [{"Content-Type", "text/xml; charset=utf-8"}, 
-                 {"Access-Control-Allow-Origin", "*"}, 
-                 {"Access-Control-Allow-Headers", "Content-Type"}]).
 
 -define(MAX_COUNT, 3).
 
@@ -95,9 +92,7 @@ handle_auth(Sid, Rid,
 	    Rid
     end.
 handle_bind(_, Rid, _, ?MAX_COUNT) ->
-    {Rid, {200,
-	   [{"Content-Type","text/xml; charset=utf-8"}],
-	   []}};
+    {Rid, {200, ?HEADER, []}};
 handle_bind(Sid, Rid, IP, Count) ->
     BindAttrs = [{"rid",integer_to_list(Rid)},
 		 {"xmlns",?NS_HTTP_BIND},
@@ -131,9 +126,7 @@ handle_bind(Sid, Rid, IP, Count) ->
 						      [{"sid",Sid}] ++ 
 						      [{"rid",integer_to_list(Rid+1)}],
 						      Els}),
-	    {Rid, {200,
-		   [{"Content-Type","text/xml; charset=utf-8"}],
-		   XmlElementString}};
+	    {Rid, {200, ?HEADER, XmlElementString}};
 	false ->
 	    handle_bind(Sid, Rid+1, IP, Count+1)
     end.

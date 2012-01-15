@@ -25,6 +25,7 @@
 -include("ejabberd.hrl").
 -include("jlib.hrl").
 -include("ejabberd_http.hrl").
+-include("http_bind.hrl").
 
 
 %%%----------------------------------------------------------------------
@@ -34,7 +35,7 @@
 process([], #request{method = 'POST',
                      data = []}) ->
     ?DEBUG("Bad Request: no data", []),
-    {400, [], {xmlelement, "h1", [],
+    {400, ?HEADER, {xmlelement, "h1", [],
 	       [{xmlcdata, "400 Bad Request"}]}};
 process([], #request{method = 'POST',
                      data = Data,
@@ -43,6 +44,16 @@ process([], #request{method = 'POST',
     ejabberd_http_pre_bind:process_request(Data, IP);
 process([], #request{method = 'GET',
                      data = []}) ->
+    {200, ?HEADER, get_human_html_xmlel()};
+process([], #request{method = 'OPTIONS',
+                     data = []}) ->
+    {200, ?OPTIONS_HEADER, []};
+process(_Path, _Request) ->
+    ?DEBUG("Bad Request: ~p", [_Request]),
+    {400, ?HEADER, {xmlelement, "h1", [],
+	       [{xmlcdata, "400 Bad Request"}]}}.
+
+get_human_html_xmlel() ->
     Heading = "Ejabberd " ++ atom_to_list(?MODULE) ++ " v" ++ ?MOD_HTTP_PRE_BIND_VERSION,
     {xmlelement, "html", [{"xmlns", "http://www.w3.org/1999/xhtml"}],
      [{xmlelement, "head", [],
@@ -53,12 +64,7 @@ process([], #request{method = 'GET',
          [{xmlcdata, "An implementation of "},
           {xmlelement, "a", [{"href", "http://www.xmpp.org/extensions/xep-0206.html"}],
            [{xmlcdata, "Pre-Bind XMPP over BOSH (XEP-0206)"}]}]}
-       ]}]};
-process(_Path, _Request) ->
-    ?DEBUG("Bad Request: ~p", [_Request]),
-    {400, [], {xmlelement, "h1", [],
-	       [{xmlcdata, "400 Bad Request"}]}}.
-
+       ]}]}.
 
 %%%----------------------------------------------------------------------
 %%% BEHAVIOUR CALLBACKS
