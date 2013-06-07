@@ -1,7 +1,7 @@
 %%%----------------------------------------------------------------------
 %%% File    : ejabberd_http_pre_bind.erl
 %%% Authors : Nathan Zorn <nathan@collecta.com>, W. Andrew Loe III <loe@onehub.com>
-%%% Purpose : Implements Pre-Bind XMPP over BOSH (XEP-0205) 
+%%% Purpose : Implements Pre-Bind XMPP over BOSH (XEP-0205)
 %%%----------------------------------------------------------------------
 
 -module(ejabberd_http_pre_bind).
@@ -26,7 +26,7 @@ process_request(Data, IP) ->
   Sid = ejabberd_http_bind:make_sid(),
   RidA = start_http_bind(Sid, IP, Rid, From, XmppDomain, Attrs),
 
-  %% If From is empty or set to Anonymous, SASL Anonymous is used. 
+  %% If From is empty or set to Anonymous, SASL Anonymous is used.
   RidB = start_auth(Sid, IP, RidA + 1, From, Password),
 
   %% Restart the XMPP Stream.
@@ -312,7 +312,7 @@ start_session(Sid, IP, Rid) ->
   RidL.
 
 %%<body xmlns='http://jabber.org/protocol/httpbind'>
-%%  <iq xmlns="jabber:client" 
+%%  <iq xmlns="jabber:client"
 %%      type="result"
 %%      id="_session_auth_2"/>
 %%</body>
