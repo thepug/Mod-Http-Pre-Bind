@@ -20,19 +20,21 @@
     process/2
   ]).
 
--include_lib("exmpp/include/exmpp.hrl").
+-include("jlib.hrl").
+
 
 -include("ejabberd_http_pre_bind.hrl").
 -include("ejabberd.hrl").
 -include("ejabberd_http.hrl").
 -include("http_bind.hrl").
+-include("logger.hrl").
 
 %%%----------------------------------------------------------------------
 %%% API
 %%%----------------------------------------------------------------------
 
 process([], #request{method = 'POST',
-    data = []}) ->
+    data = <<>>}) ->
   ?DEBUG("Bad Request: no data", []),
   ?MOD_HTTP_PRE_BIND_BAD_REQUEST;
 
@@ -43,10 +45,10 @@ process([], #request{method = 'POST',
   ejabberd_http_pre_bind:process_request(Data, IP);
 
 process([], #request{method = 'GET',
-                     data = []}) ->
+                     data = <<>>}) ->
     {200, ?HEADER, get_human_html_xmlel()};
 process([], #request{method = 'OPTIONS',
-                     data = []}) ->
+                     data = <<>>}) ->
     {200, ?OPTIONS_HEADER, []};
 process(_Path, _Request) ->
     ?DEBUG("Bad Request: ~p", [_Request]),
@@ -55,25 +57,25 @@ process(_Path, _Request) ->
 
 get_human_html_xmlel() ->
   ?DEBUG("Returning HTML", []),
-  Heading = "Ejabberd " ++ atom_to_list(?MODULE) ++ " v" ++ ?MOD_HTTP_PRE_BIND_VERSION,
-    #xmlel{name = html, attrs = [#xmlattr{name = <<"xmlns">>, value = <<"http://www.w3.org/1999/xhtml">>}], children = [
-        #xmlel{name = head, children = [
-            #xmlel{name = title, children = [
-                #xmlcdata{cdata = Heading}
+  Heading = <<"Ejabberd ", (iolist_to_binary(atom_to_list(?MODULE)))/binary, " v", ?MOD_HTTP_PRE_BIND_VERSION>>,
+    #xmlel{name = <<"html">>, attrs = [{<<"xmlns">>, <<"http://www.w3.org/1999/xhtml">>}], children = [
+        #xmlel{name = <<"head">>, children = [
+            #xmlel{name = <<"title">>, children = [
+                {xmlcdata, Heading}
               ]
             }
           ]
         },
-        #xmlel{name = body, children = [
-            #xmlel{name = body, children = [
-                #xmlel{name = h1, children = [
-                    #xmlcdata{cdata = Heading}
+        #xmlel{name = <<"body">>, children = [
+            #xmlel{name = <<"body">>, children = [
+                #xmlel{name = <<"h1">>, children = [
+                    {xmlcdata, Heading}
                   ]
                 },
-                #xmlel{name = p, children = [
-                    #xmlcdata{cdata = <<"An implementation of ">>},
-                    #xmlel{name = a, attrs = [#xmlattr{name = <<"href">>, value = <<"http://www.xmpp.org/extensions/xep-0206.html">>}], children = [
-                        #xmlcdata{cdata = <<"Pre-Bind XMPP over BOSH (XEP-0206)">>}
+                #xmlel{name = <<"p">>, children = [
+                    {xmlcdata, <<"An implementation of ">>},
+                    #xmlel{name = <<"a">>, attrs = [{<<"href">>, <<"http://www.xmpp.org/extensions/xep-0206.html">>}], children = [
+                        {xmlcdata, <<"Pre-Bind XMPP over BOSH (XEP-0206)">>}
                       ]
                     }
                   ]

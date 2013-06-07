@@ -1,4 +1,4 @@
-mod_http_pre_bind for ejabberd 3.0.x 
+mod_http_pre_bind for ejabberd community
 
 When using anonymous users the authentication process through BOSH can
 take a second or two.  These seconds can be saved by doing all of the

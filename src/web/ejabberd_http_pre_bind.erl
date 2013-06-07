@@ -8,12 +8,13 @@
 
 -export([process_request/2]).
 
--include_lib("exmpp/include/exmpp.hrl").
+-include("jlib.hrl").
 
 -include("ejabberd_http_pre_bind.hrl").
 -include("ejabberd.hrl").
 -include("ejabberd_http.hrl").
 -include("http_bind.hrl").
+-include("logger.hrl").
 
 -define(MAX_COUNT, 3).
 
@@ -23,7 +24,7 @@ process_request(Data, IP) ->
   {ok, {Rid, From, Password, XmppDomain, Attrs}} = parse_request(Data),
 
   %% Start the cycle
-  Sid = ejabberd_http_bind:make_sid(),
+  Sid = sha:sha(term_to_binary({now(), make_ref()})),
   RidA = start_http_bind(Sid, IP, Rid, From, XmppDomain, Attrs),
 
   %% If From is empty or set to Anonymous, SASL Anonymous is used.
@@ -38,35 +39,36 @@ process_request(Data, IP) ->
   %% Start the XMPP Session.
   RidE = start_session(Sid, IP, RidD + 1),
 
-  [#xmlstreamelement{element = IQ}] = BindResponse,
+  [{xmlstreamelement, IQ}] = BindResponse,
 
-  Body = exmpp_xml:element(?NS_HTTP_BIND, body, [
-      exmpp_xml:attribute(<<"rid">>, RidE + 1),
-      exmpp_xml:attribute(<<"sid">>, Sid)
-    ], IQ),
+  Body = #xmlel{name = <<"body">>, attrs = [
+      {<<"xmlns">>, ?NS_HTTP_BIND},
+      {<<"rid">>, jlib:integer_to_binary(RidE + 1)},
+      {<<"sid">>, Sid}
+    ], children = [IQ]},
 
   ?DEBUG("Body: ~p", [Body]),
   {200, ?HEADER, Body}.
 
 %% Parse the initial client request to start the Pre-Bind process.
 parse_request(Data) ->
-  case exmpp_xmlstream:parse_element(Data) of
-    [#xmlel{name = body, attrs = Attrs, children = _Children}] ->
-      case catch list_to_integer(exmpp_xml:get_attribute_from_list_as_list(Attrs, <<"rid">>, error)) of
+  case xml_stream:parse_element(Data) of
+    #xmlel{name = <<"body">>, attrs = Attrs, children = _Children} ->
+      case catch jlib:binary_to_integer(xml:get_attr_s(<<"rid">>, Attrs)) of
         {'EXIT', Reason} ->
           ?ERROR_MSG("error in body ~p",[Reason]),
           ?MOD_HTTP_PRE_BIND_BAD_REQUEST;
         Rid ->
-          From = exmpp_xml:get_attribute_from_list_as_list(Attrs, <<"from">>, error),
-          Password = exmpp_xml:get_attribute_from_list_as_list(Attrs, <<"password">>, error),
-          XmppDomain = exmpp_xml:get_attribute_from_list_as_list(Attrs, <<"to">>, error),
+          From = xml:get_attr_s(<<"from">>, Attrs),
+          Password = xml:get_attr_s(<<"password">>, Attrs),
+          XmppDomain = xml:get_attr_s(<<"to">>, Attrs),
           RetAttrs = [
-            {"wait", exmpp_xml:get_attribute_from_list_as_list(Attrs, <<"wait">>, error)},
-            {"hold", exmpp_xml:get_attribute_from_list_as_list(Attrs, <<"hold">>, error)}
+            {<<"wait">>, xml:get_attr_s(<<"wait">>, Attrs)},
+            {<<"hold">>, xml:get_attr_s(<<"hold">>, Attrs)}
           ],
           {ok, {Rid, From, Password, XmppDomain, RetAttrs}}
       end;
-    [#xmlel{name = Name, attrs = _Attrs, children = _Children}] ->
+    #xmlel{name = Name, attrs = _Attrs, children = _Children} ->
       ?ERROR_MSG("Not a body ~p",[Name]),
       ?MOD_HTTP_PRE_BIND_BAD_REQUEST;
     _ ->
@@ -88,18 +90,18 @@ parse_request(Data) ->
 %%      xmlns:xmpp='urn:xmpp:xbosh'/>
 start_http_bind(Sid, IP, Rid, From, XmppDomain, Attrs) ->
   ?DEBUG("HTTP Bind Start", []),
-  {ok, Pid} = ejabberd_http_bind:start(XmppDomain, Sid, "", IP),
+  {ok, Pid} = ejabberd_http_bind:start(XmppDomain, Sid, <<"">>, IP),
   StartAttrsXml = [
-    exmpp_xml:attribute(<<"rid">>, Rid),
-    exmpp_xml:attribute(<<"to">>, XmppDomain),
-    exmpp_xml:attribute(<<"from">>, From),
-    exmpp_xml:attribute(?NS_XML, <<"lang">>, <<"en">>),
-    exmpp_xml:attribute(<<"content">>, <<"text/xml; charset=utf-8">>),
-    exmpp_xml:attribute(<<"ver">>, <<"1.6">>),
-    exmpp_xml:attribute(?NS_BOSH, <<"version">>, <<"1.0">>),
-    exmpp_xml:attribute(<<"xmlns">>, ?NS_HTTP_BIND_b)
+    {<<"rid">>, Rid},
+    {<<"to">>, XmppDomain},
+    {<<"from">>, From},
+    {<<"xml", ":", "lang">>, <<"en">>},
+    {<<"content">>, <<"text/xml; charset=utf-8">>},
+    {<<"ver">>, <<"1.6">>},
+    {<<"xmpp", ":", "version">>, <<"1.0">>},
+    {<<"xmlns">>, ?NS_HTTP_BIND}
   ],
-  AttrsXml = lists:map(fun(X) -> {Key, Val} = X, Bkey = list_to_binary(Key), Bval = list_to_binary(Val), exmpp_xml:attribute(Bkey, Bval) end, Attrs),
+  AttrsXml = Attrs,
   FullAttrs = lists:append(StartAttrsXml, AttrsXml),
   %% handle_session_start does some internal consistentcy checkes, then passes to handle_http_put
   Rid = handle_http_bind(Pid, XmppDomain, Sid, Rid, FullAttrs, [], 0, IP, 0),
@@ -153,9 +155,9 @@ handle_http_bind(Pid, XmppDomain, Sid, Rid, Attrs, Payload, PayloadSize, IP, _Co
 start_auth(Sid, IP, Rid, From, Password) ->
   ?DEBUG("Authentication Start", []),
   Attrs = [
-    exmpp_xml:attribute(<<"rid">>, Rid),
-    exmpp_xml:attribute(<<"sid">>, Sid),
-    exmpp_xml:attribute(<<"xmlns">>, ?NS_HTTP_BIND_b)
+    {<<"rid">>, Rid},
+    {<<"sid">>, Sid},
+    {<<"xmlns">>, ?NS_HTTP_BIND}
   ],
   Payload = auth_payload(From, Password),
   RidL = handle_auth(Sid, Rid, Attrs, Payload, 0, false, IP, 0),
@@ -163,15 +165,25 @@ start_auth(Sid, IP, Rid, From, Password) ->
 
 %% Decide and generate the appropriate SASL response.
 auth_payload(From, Password) ->
-  Mechanism = case catch exmpp_jid:parse(From) of
+  Mechanism = case catch jlib:string_to_jid(From) of
     {'EXIT', _Reason} ->
-      exmpp_client_sasl:selected_mechanism("ANONYMOUS");
+      selected_mechanism(<<"ANONYMOUS">>);
     Jid ->
-      InitialResponse = iolist_to_binary([0, exmpp_jid:node_as_list(Jid), 0, Password]),
-      exmpp_client_sasl:selected_mechanism("PLAIN", InitialResponse)
+      InitialResponse = iolist_to_binary([0, jlib:jid_to_string(Jid), 0, Password]),
+      selected_mechanism(<<"PLAIN">>, InitialResponse)
   end,
   [Mechanism].
 
+selected_mechanism(Mechanism) ->
+    #xmlel{name = <<"auth">>,
+           attrs = [
+                    {<<"xmlns">>, ?NS_SASL},
+                    {<<"mechanism">>, Mechanism}
+                   ]
+          }.
+selected_mechanism(Mechanism, Initial_Response) ->
+    El = selected_mechanism(Mechanism),
+    El#xmlel{children = [{xmlcdata, base64:encode(Initial_Response)}]}.
 
 %%<body xmlns='http://jabber.org/protocol/httpbind'>
 %%  <success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>
@@ -182,7 +194,7 @@ handle_auth(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_C
 
 handle_auth(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
   case handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
-    {ok, [#xmlstreamelement{element = #xmlel{name = success}}]} ->
+    {ok, [{xmlstreamelement, #xmlel{name = <<"success">>}}]} ->
       ?DEBUG("Authentication Success", []),
       Rid;
     {ok, Response} ->
@@ -204,12 +216,12 @@ handle_auth(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
 restart_stream(Sid, IP, Rid, XmppDomain) ->
   ?DEBUG("Restart Stream Start", []),
   Attrs = [
-    exmpp_xml:attribute(<<"rid">>, Rid),
-    exmpp_xml:attribute(<<"sid">>, Sid),
-    exmpp_xml:attribute(<<"to">>, XmppDomain),
-    exmpp_xml:attribute(?NS_XML, <<"lang">>, <<"en">>),
-    exmpp_xml:attribute(?NS_BOSH, <<"restart">>, <<"true">>),
-    exmpp_xml:attribute(<<"xmlns">>, ?NS_HTTP_BIND_b)
+    {<<"rid">>, Rid},
+    {<<"sid">>, Sid},
+    {<<"to">>, XmppDomain},
+    {<<"xml", ":", "lang">>, <<"en">>},
+    {<<"xmpp", ":", "restart">>, <<"true">>},
+    {<<"xmlns">>, ?NS_HTTP_BIND}
   ],
   RidL = handle_restart_stream(Sid, Rid, Attrs, [], 0, true, IP, 0),
   RidL.
@@ -227,7 +239,7 @@ handle_restart_stream(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _
 
 handle_restart_stream(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
   case handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
-    {ok, [#xmlstreamelement{element = #xmlel{name = features}}]} ->
+    {ok, [{xmlstreamelement, #xmlel{name = <<"stream:features">>}}]} ->
       ?DEBUG("Restart Stream Success", []),
       Rid;
     {ok, Response} ->
@@ -253,11 +265,32 @@ handle_restart_stream(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Co
 start_bind(Sid, IP, Rid) ->
   ?DEBUG("Bind Start", []),
   Attrs = [
-    exmpp_xml:attribute(<<"rid">>, Rid),
-    exmpp_xml:attribute(<<"sid">>, Sid),
-    exmpp_xml:attribute(<<"xmlns">>, ?NS_HTTP_BIND_b)
+    {<<"rid">>, Rid},
+    {<<"sid">>, Sid},
+    {<<"xmlns">>, ?NS_HTTP_BIND}
   ],
-  Payload = [exmpp_client_binding:bind()],
+  Payload = [#xmlel{
+        name = <<"iq">>,
+        attrs = [
+            {<<"type">>, <<"set">>},
+            {<<"id">>, <<"bind_1">>},
+            {<<"xmlns">>, <<"jabber:client">>}
+        ],
+        children = [
+            #xmlel{
+                name = <<"bind">>,
+                attrs = [
+                    {<<"xmlns">>, <<"urn:ietf:params:xml:ns:xmpp-bind">>}
+                ],
+                children = [
+%% TODO: return clever resource name
+%%                     #xmlel{name = <<"resource">>,
+%%                         children = [{xmlcdata, <<"httpclient">>}]
+%%                     }
+                ]
+            }
+        ]
+    }],
   RidL = handle_bind(Sid, Rid, Attrs, Payload, 0, false, IP, 0),
   RidL.
 
@@ -278,7 +311,7 @@ handle_bind(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MAX_C
 handle_bind(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
   R = handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP),
   case R of
-    {ok, [#xmlstreamelement{element = #xmlel{name = iq}}]} ->
+    {ok, [{xmlstreamelement, #xmlel{name = <<"iq">>}}]} ->
       ?DEBUG("Bind Success", []),
       {_Status, Body} = R,
       {Rid, Body};
@@ -303,11 +336,26 @@ handle_bind(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
 start_session(Sid, IP, Rid) ->
   ?DEBUG("Start Session", []),
   Attrs = [
-    exmpp_xml:attribute(<<"rid">>, Rid),
-    exmpp_xml:attribute(<<"sid">>, Sid),
-    exmpp_xml:attribute(<<"xmlns">>, ?NS_HTTP_BIND_b)
+    {<<"rid">>, Rid},
+    {<<"sid">>, Sid},
+    {<<"xmlns">>, ?NS_HTTP_BIND}
   ],
-  Payload = [exmpp_client_session:establish()],
+  Payload = [#xmlel{
+        name = <<"iq">>,
+        attrs = [
+            {<<"type">>, <<"set">>},
+            {<<"id">>, <<"_session_auth_2">>},
+            {<<"xmlns">>, <<"jabber:client">>}
+        ],
+        children = [
+            #xmlel{
+                name = <<"session">>,
+                attrs = [
+                    {<<"xmlns">>, <<"urn:ietf:params:xml:ns:xmpp-session">>}
+                ]
+            }
+        ]
+    }],
   RidL = handle_session(Sid, Rid, Attrs, Payload, 0, false, IP, 0),
   RidL.
 
@@ -322,7 +370,7 @@ handle_session(_Sid, Rid, _Attrs, _Payload, _PayloadSize, _StreamStart, _IP, ?MA
 
 handle_session(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP, Count) ->
   case handle_http_put(Sid, Rid, Attrs, Payload, PayloadSize, StreamStart, IP) of
-    {ok, [#xmlstreamelement{element = #xmlel{name = iq}}]} ->
+    {ok, [{xmlstreamelement, #xmlel{name = <<"iq">>}}]} ->
       ?DEBUG("Session Success", []),
       Rid;
     {ok, Response} ->
