@@ -29,6 +29,7 @@
 -include("http_bind.hrl").
 -include("logger.hrl").
 
+
 %%%----------------------------------------------------------------------
 %%% API
 %%%----------------------------------------------------------------------
@@ -49,11 +50,12 @@ process([], #request{method = 'GET',
     {200, ?HEADER, get_human_html_xmlel()};
 process([], #request{method = 'OPTIONS',
                      data = <<>>}) ->
-    {200, ?OPTIONS_HEADER, []};
+    {200, ?OPTIONS_HEADER, <<>>};
+process([], #request{method = 'HEAD'}) ->
+    {200, ?HEADER, <<>>};
 process(_Path, _Request) ->
     ?DEBUG("Bad Request: ~p", [_Request]),
-    {400, ?HEADER, {xmlelement, "h1", [],
-           [{xmlcdata, "400 Bad Request"}]}}.
+    ?MOD_HTTP_PRE_BIND_BAD_REQUEST.
 
 get_human_html_xmlel() ->
   ?DEBUG("Returning HTML", []),
