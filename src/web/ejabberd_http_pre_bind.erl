@@ -43,7 +43,7 @@ process_request(Data, IP) ->
 
   Body = #xmlel{name = <<"body">>, attrs = [
       {<<"xmlns">>, ?NS_HTTP_BIND},
-      {<<"rid">>, jlib:integer_to_binary(RidE + 1)},
+      {<<"rid">>, jlib:integer_to_binary(RidE)},
       {<<"sid">>, Sid}
     ], children = [IQ]},
 
