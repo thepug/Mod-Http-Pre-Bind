@@ -13,6 +13,7 @@
 -include("ejabberd_http_pre_bind.hrl").
 -include("ejabberd.hrl").
 -include("ejabberd_http.hrl").
+-include("http_bind.hrl").
 
 -define(MAX_COUNT, 3).
 
@@ -45,7 +46,7 @@ process_request(Data, IP) ->
     ], IQ),
 
   ?DEBUG("Body: ~p", [Body]),
-  {200, [], Body}.
+  {200, ?HEADER, Body}.
 
 %% Parse the initial client request to start the Pre-Bind process.
 parse_request(Data) ->

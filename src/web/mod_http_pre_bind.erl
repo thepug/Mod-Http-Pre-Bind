@@ -25,6 +25,7 @@
 -include("ejabberd_http_pre_bind.hrl").
 -include("ejabberd.hrl").
 -include("ejabberd_http.hrl").
+-include("http_bind.hrl").
 
 %%%----------------------------------------------------------------------
 %%% API
@@ -42,10 +43,19 @@ process([], #request{method = 'POST',
   ejabberd_http_pre_bind:process_request(Data, IP);
 
 process([], #request{method = 'GET',
-    data = []}) ->
+                     data = []}) ->
+    {200, ?HEADER, get_human_html_xmlel()};
+process([], #request{method = 'OPTIONS',
+                     data = []}) ->
+    {200, ?OPTIONS_HEADER, []};
+process(_Path, _Request) ->
+    ?DEBUG("Bad Request: ~p", [_Request]),
+    {400, ?HEADER, {xmlelement, "h1", [],
+           [{xmlcdata, "400 Bad Request"}]}}.
+
+get_human_html_xmlel() ->
   ?DEBUG("Returning HTML", []),
   Heading = "Ejabberd " ++ atom_to_list(?MODULE) ++ " v" ++ ?MOD_HTTP_PRE_BIND_VERSION,
-  {200, [], 
     #xmlel{name = html, attrs = [#xmlattr{name = <<"xmlns">>, value = <<"http://www.w3.org/1999/xhtml">>}], children = [
         #xmlel{name = head, children = [
             #xmlel{name = title, children = [
@@ -73,12 +83,8 @@ process([], #request{method = 'GET',
           ]
         }
       ]
-    }
-  };
+    }.
 
-process(_Path, _Request) ->
-  ?DEBUG("Bad Request: ~p", [_Request]),
-  ?MOD_HTTP_PRE_BIND_BAD_REQUEST.
 
 %%%----------------------------------------------------------------------
 %%% BEHAVIOUR CALLBACKS
