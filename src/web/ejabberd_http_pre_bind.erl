@@ -24,7 +24,7 @@ process_request(Data, IP) ->
   {ok, {Rid, From, Password, XmppDomain, Attrs}} = parse_request(Data),
 
   %% Start the cycle
-  Sid = sha:sha(term_to_binary({now(), make_ref()})),
+  Sid = p1_sha:sha(term_to_binary({now(), make_ref()})),
   RidA = start_http_bind(Sid, IP, Rid, From, XmppDomain, Attrs),
 
   %% If From is empty or set to Anonymous, SASL Anonymous is used.
