@@ -12,20 +12,22 @@
 -module(mod_http_pre_bind).
 -author('nathan@collecta.com').
 
--define(MOD_HTTP_PRE_BIND_VERSION, "0.1").
-
 -behaviour(gen_mod).
 
 -export([
-         start/2,
-         stop/1,
-         process/2
-	]).
+    start/2,
+    stop/1,
+    process/2
+  ]).
 
--include("ejabberd.hrl").
 -include("jlib.hrl").
+
+
+-include("ejabberd_http_pre_bind.hrl").
+-include("ejabberd.hrl").
 -include("ejabberd_http.hrl").
 -include("http_bind.hrl").
+-include("logger.hrl").
 
 
 %%%----------------------------------------------------------------------
@@ -33,68 +35,90 @@
 %%%----------------------------------------------------------------------
 
 process([], #request{method = 'POST',
-                     data = []}) ->
-    ?DEBUG("Bad Request: no data", []),
-    {400, ?HEADER, {xmlelement, "h1", [],
-	       [{xmlcdata, "400 Bad Request"}]}};
+    data = <<>>}) ->
+  ?DEBUG("Bad Request: no data", []),
+  ?MOD_HTTP_PRE_BIND_BAD_REQUEST;
+
 process([], #request{method = 'POST',
-                     data = Data,
-                     ip = IP}) ->
-    ?DEBUG("Incoming data: ~s", [Data]),
-    ejabberd_http_pre_bind:process_request(Data, IP);
+    data = Data,
+    ip = IP}) ->
+  ?DEBUG("Incoming data: ~s", [Data]),
+  ejabberd_http_pre_bind:process_request(Data, IP);
+
 process([], #request{method = 'GET',
-                     data = []}) ->
+                     data = <<>>}) ->
     {200, ?HEADER, get_human_html_xmlel()};
 process([], #request{method = 'OPTIONS',
-                     data = []}) ->
-    {200, ?OPTIONS_HEADER, []};
+                     data = <<>>}) ->
+    {200, ?OPTIONS_HEADER, <<>>};
+process([], #request{method = 'HEAD'}) ->
+    {200, ?HEADER, <<>>};
 process(_Path, _Request) ->
     ?DEBUG("Bad Request: ~p", [_Request]),
-    {400, ?HEADER, {xmlelement, "h1", [],
-	       [{xmlcdata, "400 Bad Request"}]}}.
+    ?MOD_HTTP_PRE_BIND_BAD_REQUEST.
 
 get_human_html_xmlel() ->
-    Heading = "Ejabberd " ++ atom_to_list(?MODULE) ++ " v" ++ ?MOD_HTTP_PRE_BIND_VERSION,
-    {xmlelement, "html", [{"xmlns", "http://www.w3.org/1999/xhtml"}],
-     [{xmlelement, "head", [],
-       [{xmlelement, "title", [], [{xmlcdata, Heading}]}]},
-      {xmlelement, "body", [],
-       [{xmlelement, "h1", [], [{xmlcdata, Heading}]},
-        {xmlelement, "p", [],
-         [{xmlcdata, "An implementation of "},
-          {xmlelement, "a", [{"href", "http://www.xmpp.org/extensions/xep-0206.html"}],
-           [{xmlcdata, "Pre-Bind XMPP over BOSH (XEP-0206)"}]}]}
-       ]}]}.
+  ?DEBUG("Returning HTML", []),
+  Heading = <<"Ejabberd ", (iolist_to_binary(atom_to_list(?MODULE)))/binary, " v", ?MOD_HTTP_PRE_BIND_VERSION>>,
+    #xmlel{name = <<"html">>, attrs = [{<<"xmlns">>, <<"http://www.w3.org/1999/xhtml">>}], children = [
+        #xmlel{name = <<"head">>, children = [
+            #xmlel{name = <<"title">>, children = [
+                {xmlcdata, Heading}
+              ]
+            }
+          ]
+        },
+        #xmlel{name = <<"body">>, children = [
+            #xmlel{name = <<"body">>, children = [
+                #xmlel{name = <<"h1">>, children = [
+                    {xmlcdata, Heading}
+                  ]
+                },
+                #xmlel{name = <<"p">>, children = [
+                    {xmlcdata, <<"An implementation of ">>},
+                    #xmlel{name = <<"a">>, attrs = [{<<"href">>, <<"http://www.xmpp.org/extensions/xep-0206.html">>}], children = [
+                        {xmlcdata, <<"Pre-Bind XMPP over BOSH (XEP-0206)">>}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }.
+
 
 %%%----------------------------------------------------------------------
 %%% BEHAVIOUR CALLBACKS
 %%%----------------------------------------------------------------------
 start(_Host, _Opts) ->
-    HTTPBindSupervisor =
-        {ejabberd_http_pre_bind_sup,
-         {ejabberd_tmp_sup, start_link,
-          [ejabberd_http_pre_bind_sup, ejabberd_http_pre_bind]},
-         permanent,
-         infinity,
-         supervisor,
-         [ejabberd_tmp_sup]},
-    case supervisor:start_child(ejabberd_sup, HTTPBindSupervisor) of
-        {ok, _Pid} ->
-            ok;
-        {ok, _Pid, _Info} ->
-            ok;
-        {error, {already_started, _PidOther}} ->
-            % mod_http_pre_bind is already started so it will not be started again
-            ok;
-        {error, Error} ->
-            {'EXIT', {start_child_error, Error}}
-    end.
+  HTTPBindSupervisor =
+  {ejabberd_http_pre_bind_sup,
+    {ejabberd_tmp_sup, start_link,
+      [ejabberd_http_pre_bind_sup, ejabberd_http_pre_bind]},
+    permanent,
+    infinity,
+    supervisor,
+    [ejabberd_tmp_sup]},
+  case supervisor:start_child(ejabberd_sup, HTTPBindSupervisor) of
+    {ok, _Pid} ->
+      ok;
+    {ok, _Pid, _Info} ->
+      ok;
+    {error, {already_started, _PidOther}} ->
+      % mod_http_pre_bind is already started so it will not be started again
+      ok;
+    {error, Error} ->
+      {'EXIT', {start_child_error, Error}}
+  end.
 
 stop(_Host) ->
-    case supervisor:terminate_child(ejabberd_sup, ejabberd_http_pre_bind_sup) of
-        ok ->
-            ok;
-        {error, Error} ->
-            {'EXIT', {terminate_child_error, Error}}
-    end.
+  case supervisor:terminate_child(ejabberd_sup, ejabberd_http_pre_bind_sup) of
+    ok ->
+      ok;
+    {error, Error} ->
+      {'EXIT', {terminate_child_error, Error}}
+  end.
 

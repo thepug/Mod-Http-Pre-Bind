@@ -1,4 +1,4 @@
-mod_http_pre_bind for ejabberd. 
+mod_http_pre_bind for ejabberd community
 
 When using anonymous users the authentication process through BOSH can
 take a second or two.  These seconds can be saved by doing all of the
@@ -6,8 +6,7 @@ authentication and bosh session setup on one call. mod_http_pre_bind
 does this and returns a jid, sid, and rid of a valid BOSH session.
 
 It requires mod_http_bind.  Modifications are needed to
-src/web/ejabberd_http_bind.erl. The start, http_get, http_put,
-handle_session_start, and prepare_response functions need to be made
+src/web/ejabberd_http_bind.erl. The make_sid() function needs to be made
 public in the module code.  This prebind module simply calls those
 functions to initiate and handle a session.
 
@@ -35,12 +34,13 @@ Install both in ejabberd.cfg.
   {mod_http_pre_bind,      []},
 
 
-Example post and response:
+Example posts and response:
 
-POST
+SASL Anonymous: POST
 <body to='example.com' rid='1234567' wait='60' hold='1' />
 
-
+SASL PLAIN:
+<body from='foo@example.com' password='foobarbaz' to='example.com' rid='1234567' wait='60' hold='1' />
 
 Response:
  <body xmlns='http://jabber.org/protocol/httpbind'   
@@ -54,4 +54,3 @@ Response:
      </bind>  
    </iq>  
 </body>
-
